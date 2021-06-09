@@ -217,69 +217,132 @@ pre code {
 <!-- rnb-text-begin -->
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxua25pdHI6Om9wdHNfY2h1bmskc2V0KGVjaG8gPSBUUlVFKVxubGlicmFyeSh0aWR5dmVyc2UpXG5gYGAifQ== -->
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxua25pdHI6Om9wdHNfY2h1bmskc2V0KGVjaG8gPSBUUlVFKVxubGlicmFyeSh0aWR5dmVyc2UpXG5saWJyYXJ5KERCSSkgIyBwb3VyIGxlcyBjb25uZXhpb25zIGF1eCBCRERcbmxpYnJhcnkoUlBvc3RncmVTUUwpICMgZHJpdmVyIHBvc3RncmVzXG5saWJyYXJ5KFJNYXJpYURCKSAjIGRyaXZlclxubGlicmFyeShSTXlTUUwpXG5saWJyYXJ5KGx1YnJpZGF0ZSkgIyBjYWxjdWwgc3VyIGxlcyBkYXRlc1xuXG5saWJyYXJ5KGh0dHIpICNcbmxpYnJhcnkoanNvbmxpdGUpXG5cbmBgYCJ9 -->
 <pre class="r"><code>knitr::opts_chunk$set(echo = TRUE)
-library(tidyverse)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiUmVnaXN0ZXJlZCBTMyBtZXRob2RzIG92ZXJ3cml0dGVuIGJ5ICdkYnBseXInOlxuICBtZXRob2QgICAgICAgICBmcm9tXG4gIHByaW50LnRibF9sYXp5ICAgICBcbiAgcHJpbnQudGJsX3NxbCAgICAgIFxuLS0gQXR0YWNoaW5nIHBhY2thZ2VzIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tIHRpZHl2ZXJzZSAxLjMuMSAtLVxudiBnZ3Bsb3QyIDMuMy4zICAgICB2IHB1cnJyICAgMC4zLjRcbnYgdGliYmxlICAzLjEuMSAgICAgdiBkcGx5ciAgIDEuMC41XG52IHRpZHlyICAgMS4xLjMgICAgIHYgc3RyaW5nciAxLjQuMFxudiByZWFkciAgIDEuNC4wICAgICB2IGZvcmNhdHMgMC41LjFcbi0tIENvbmZsaWN0cyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLSB0aWR5dmVyc2VfY29uZmxpY3RzKCkgLS1cbnggZHBseXI6OmZpbHRlcigpIG1hc2tzIHN0YXRzOjpmaWx0ZXIoKVxueCBkcGx5cjo6bGFnKCkgICAgbWFza3Mgc3RhdHM6OmxhZygpXG4ifQ== -->
-<pre><code>Registered S3 methods overwritten by &#39;dbplyr&#39;:
-  method         from
-  print.tbl_lazy     
-  print.tbl_sql      
--- Attaching packages ----------------------------------------------------------------------------------------------- tidyverse 1.3.1 --
-v ggplot2 3.3.3     v purrr   0.3.4
-v tibble  3.1.1     v dplyr   1.0.5
-v tidyr   1.1.3     v stringr 1.4.0
-v readr   1.4.0     v forcats 0.5.1
--- Conflicts -------------------------------------------------------------------------------------------------- tidyverse_conflicts() --
-x dplyr::filter() masks stats::filter()
-x dplyr::lag()    masks stats::lag()</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubGlicmFyeShEQkkpICMgcG91ciBsZXMgY29ubmV4aW9ucyBhdXggQkREXG5saWJyYXJ5KFJQb3N0Z3JlU1FMKSAjIGRyaXZlciBwb3N0Z3Jlc1xubGlicmFyeShSTWFyaWFEQikgIyBkcml2ZXJcbmxpYnJhcnkoUk15U1FMKVxuYGBgIn0= -->
-<pre class="r"><code>library(DBI) # pour les connexions aux BDD
+library(tidyverse)
+library(DBI) # pour les connexions aux BDD
 library(RPostgreSQL) # driver postgres
 library(RMariaDB) # driver
-library(RMySQL)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiXG5BdHRhY2hlbWVudCBkdSBwYWNrYWdlIDog46S847ixUk15U1FM46S847iyXG5cblRoZSBmb2xsb3dpbmcgb2JqZWN0IGlzIG1hc2tlZCBmcm9tIOOkvOO4sXBhY2thZ2U6UlBvc3RncmVTUUzjpLzjuLI6XG5cbiAgICBkYkFwcGx5XG4ifQ== -->
-<pre><code>
-Attachement du package : 㤼㸱RMySQL㤼㸲
+library(RMySQL)
+library(lubridate) # calcul sur les dates
 
-The following object is masked from 㤼㸱package:RPostgreSQL㤼㸲:
-
-    dbApply</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubGlicmFyeShsdWJyaWRhdGUpXG5gYGAifQ== -->
-<pre class="r"><code>library(lubridate)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiXG5BdHRhY2hlbWVudCBkdSBwYWNrYWdlIDog46S847ixbHVicmlkYXRl46S847iyXG5cblRoZSBmb2xsb3dpbmcgb2JqZWN0cyBhcmUgbWFza2VkIGZyb20g46S847ixcGFja2FnZTpiYXNl46S847iyOlxuXG4gICAgZGF0ZSwgaW50ZXJzZWN0LCBzZXRkaWZmLCB1bmlvblxuIn0= -->
-<pre><code>
-Attachement du package : 㤼㸱lubridate㤼㸲
-
-The following objects are masked from 㤼㸱package:base㤼㸲:
-
-    date, intersect, setdiff, union</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-chunk-end -->
-<!-- rnb-text-begin -->
-<!-- rnb-text-end -->
-<!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuXG5jb25fbXlzcWxfbG9jYWwgPC0gZGJDb25uZWN0KG9kYmM6Om9kYmMoKSwgLmNvbm5lY3Rpb25fc3RyaW5nID0gXCJcbiAgICAgICAgICAgICAgICAgICAgICAgICAgIERyaXZlcj17TXlTUUwgT0RCQyA4LjAgVW5pY29kZSBEcml2ZXJ9O1xuICAgICAgICAgICAgICAgICAgICAgICAgICAgdXNlciA9IHJvb3Q7XG4gICAgICAgICAgICAgICAgICAgICAgICAgICBwYXNzd29yZCA9IHJvb3Q7XG4gICAgICAgICAgICAgICAgICAgICAgICAgICBkYXRhYmFzZSA9IG9lYl9hcnNfY3lhbm87XG4gICAgICAgICAgICAgICAgICAgICAgICAgICBob3N0ID0gbG9jYWxob3N0XCIsXG4gICAgdGltZW91dCA9IDEwKVxuXG5gYGAifQ== -->
-<pre class="r"><code>
-con_mysql_local &lt;- dbConnect(odbc::odbc(), .connection_string = &quot;
-                           Driver={MySQL ODBC 8.0 Unicode Driver};
-                           user = root;
-                           password = root;
-                           database = oeb_ars_cyano;
-                           host = localhost&quot;,
-    timeout = 10)
+library(httr) #
+library(jsonlite)
 </code></pre>
 <!-- rnb-source-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 <!-- rnb-text-end -->
+<!-- rnb-chunk-begin -->
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuYXBpX3JlcG9uc2UgPC0gZnVuY3Rpb24ocmVxdWVzdCkge1xuICBcbmNhc2Vfd2hlbihyZXF1ZXN0JHN0YXR1c19jb2RlPT0yMDAgfiBcIk9LLCB0b3VzIGxlcyByw6lzdWx0YXRzIHNvbnQgcHLDqXNlbnRzIGRhbnMgbGEgcsOpcG9uc2VcIixcbiAgICAgICAgICByZXF1ZXN0JHN0YXR1c19jb2RlPT0yMDYgfiBcIk9LLCBpbCByZXN0ZSBkZXMgcsOpc3VsdGF0c1wiLFxuICAgICAgICAgIHJlcXVlc3Qkc3RhdHVzX2NvZGU9PTQwMCB+IFwiUmVxdcOqdGUgaW5jb3JyZWN0ZVwiLFxuICAgICAgICAgICAgVFJVRSB+IFwiQXV0cmUgcsOpcG9uc2VcIilcbn1cbmBgYCJ9 -->
+<pre class="r"><code>api_reponse &lt;- function(request) {
+  
+case_when(request$status_code==200 ~ &quot;OK, tous les résultats sont présents dans la réponse&quot;,
+          request$status_code==206 ~ &quot;OK, il reste des résultats&quot;,
+          request$status_code==400 ~ &quot;Requête incorrecte&quot;,
+            TRUE ~ &quot;Autre réponse&quot;)
+}</code></pre>
+<!-- rnb-source-end -->
+<!-- rnb-chunk-end -->
+<!-- rnb-text-begin -->
+<!-- rnb-text-end -->
+<!-- rnb-chunk-begin -->
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuXG5jb25fbXlzcWxfbG9jYWwgPC0gZGJDb25uZWN0KG9kYmM6Om9kYmMoKSwgLmNvbm5lY3Rpb25fc3RyaW5nID0gXCJcbiAgICAgICAgICAgICAgICAgICAgICAgICAgIERyaXZlcj17TXlTUUwgT0RCQyA4LjAgVW5pY29kZSBEcml2ZXJ9O1xuICAgICAgICAgICAgICAgICAgICAgICAgICAgdXNlciA9IHJvb3Q7XG4gICAgICAgICAgICAgICAgICAgICAgICAgICBwYXNzd29yZCA9IHJvb3Q7XG4gICAgICAgICAgICAgICAgICAgICAgICAgICBkYXRhYmFzZSA9IG9lYl90Ymk7XG4gICAgICAgICAgICAgICAgICAgICAgICAgICBob3N0ID0gbG9jYWxob3N0XCIsXG4gICAgdGltZW91dCA9IDEwKVxuXG5kYkxpc3RUYWJsZXMoY29uX215c3FsX2xvY2FsKSAjIExpc3RlciBsZXMgdGFibGVzIGRlIGxhIGJhc2VcbmBgYCJ9 -->
+<pre class="r"><code>
+con_mysql_local &lt;- dbConnect(odbc::odbc(), .connection_string = &quot;
+                           Driver={MySQL ODBC 8.0 Unicode Driver};
+                           user = root;
+                           password = root;
+                           database = oeb_tbi;
+                           host = localhost&quot;,
+    timeout = 10)
 
-<div id="rmd-source-code">LS0tDQp0aXRsZTogIkludGVncmF0aW9uIGRlcyBkb25uw6llcyBwaWV6b21ldHJpcXVlcyINCm91dHB1dDogaHRtbF9ub3RlYm9vaw0KDQpwYXJhbXM6DQogIHJlc2VhdV9waWV6bzonMDQwMDAwMDAyMCcNCi0tLQ0KDQpgYGB7ciBzZXR1cH0NCmtuaXRyOjpvcHRzX2NodW5rJHNldChlY2hvID0gVFJVRSkNCmxpYnJhcnkodGlkeXZlcnNlKQ0KbGlicmFyeShEQkkpICMgcG91ciBsZXMgY29ubmV4aW9ucyBhdXggQkREDQpsaWJyYXJ5KFJQb3N0Z3JlU1FMKSAjIGRyaXZlciBwb3N0Z3Jlcw0KbGlicmFyeShSTWFyaWFEQikgIyBkcml2ZXINCmxpYnJhcnkoUk15U1FMKQ0KbGlicmFyeShsdWJyaWRhdGUpDQpgYGANCg0KYGBge3IgY29ubmV4aW9uX2JkfQ0KDQpjb25fbXlzcWxfbG9jYWwgPC0gZGJDb25uZWN0KG9kYmM6Om9kYmMoKSwgLmNvbm5lY3Rpb25fc3RyaW5nID0gIg0KICAgICAgICAgICAgICAgICAgICAgICAgICAgRHJpdmVyPXtNeVNRTCBPREJDIDguMCBVbmljb2RlIERyaXZlcn07DQogICAgICAgICAgICAgICAgICAgICAgICAgICB1c2VyID0gcm9vdDsNCiAgICAgICAgICAgICAgICAgICAgICAgICAgIHBhc3N3b3JkID0gcm9vdDsNCiAgICAgICAgICAgICAgICAgICAgICAgICAgIGRhdGFiYXNlID0gb2ViX2Fyc19jeWFubzsNCiAgICAgICAgICAgICAgICAgICAgICAgICAgIGhvc3QgPSBsb2NhbGhvc3QiLA0KICAgIHRpbWVvdXQgPSAxMCkNCg0KYGBgDQoNCg0K</div>
+dbListTables(con_mysql_local) # Lister les tables de la base</code></pre>
+<!-- rnb-source-end -->
+<!-- rnb-output-begin eyJkYXRhIjoiIFsxXSBcImFlbGJfZWVtZV9jZV9pbXBvcnRcIiAgICAgICAgICAgICAgICAgICAgXCJhZWxiX2VlbWVfZXNfaW1wb3J0XCIgICAgICAgICAgICAgICAgICAgIFwiYWVsYl9lZW1lX21lY2VfZGVzY3JpcHRpb25cIiAgICAgICAgICAgIFxuIFs0XSBcImFlbGJfZWVtZV9tZWVzX2Rlc2NyaXB0aW9uXCIgICAgICAgICAgICAgXCJvZWJfZWF1X2FsdGVyYXRpb25faHlkcm9tb3JwaG9sb2dpcXVlXCIgIFwib2ViX2VhdV9wcmVsZXZlbWVudF9lYXVfYnJ1dGVcIiAgICAgICAgIFxuIFs3XSBcIm9lYl9lYXVfcHJlbGV2ZW1lbnRfZWF1X2JydXRlX2NvbW11bmVcIiAgXCJvZWJfZWF1X3ByZWxldmVtZW50X2VhdV9icnV0ZV9vdXZyYWdlXCIgIFwib2ViX2VhdV9xdWFsaXRlX2Jpb2xvZ2lxdWVfY2VcIiAgICAgICAgIFxuWzEwXSBcIm9lYl9lcnVcIiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgXCJvZWJfZXJ1X2FnbG9cIiAgICAgICAgICAgICAgICAgICAgICAgICAgIFwib2ViX2VydV9ib3VlXCIgICAgICAgICAgICAgICAgICAgICAgICAgIFxuWzEzXSBcIm9lYl9lcnVfc3RldVwiICAgICAgICAgICAgICAgICAgICAgICAgICAgXCJvZWJfaW1wb3J0X2Rvbm5lZXBlM2IxXCIgICAgICAgICAgICAgICAgIFwib2ViX3N1cmZhY2VfY3VsdHVyZV9ycGcyMDE2XCIgICAgICAgICAgIFxuWzE2XSBcIm9lYl90YmlfaXJlcF9jb25zb2luZFwiICAgICAgICAgICAgICAgICAgXCJvZWJfdGJpX25hcHBlX21veVwiICAgICAgICAgICAgICAgICAgICAgIFwib2ViX3RiaV9uaXRyYXRlX2VhdV9zb3V0ZXJyYWluZVwiICAgICAgIFxuWzE5XSBcIm9lYl90Ymlfbml0cmF0ZV9lYXVfc291dGVycmFpbmVfc2l0ZVwiICAgXCJvZWJfdGJpX25pdHJhdGVfbmFwcGVcIiAgICAgICAgICAgICAgICAgIFwib2ViX3RiaV9uaXZlYXVuYXBwZWFuXCIgICAgICAgICAgICAgICAgIFxuWzIyXSBcIm9lYl90Ymlfb25kZVwiICAgICAgICAgICAgICAgICAgICAgICAgICAgXCJvZWJfdGJpX3BlYlwiICAgICAgICAgICAgICAgICAgICAgICAgICAgIFwib2ViX3RiaV9wcmVsZXZlbWVudF90bXBcIiAgICAgICAgICAgICAgIFxuWzI1XSBcIm9lYl90YmlfcXVhbGl0ZWJpb1wiICAgICAgICAgICAgICAgICAgICAgXCJvZWJfdGJpX3F1YWxpdGViaW9fdG1wXCIgICAgICAgICAgICAgICAgIFwib2ViX3RiaV9xdWFsaXRlYmlvX3RtcDJcIiAgICAgICAgICAgICAgIFxuWzI4XSBcIm9lYl90Ymlfc2lzcGVhXCIgICAgICAgICAgICAgICAgICAgICAgICAgXCJvZWJfdGJpX3ZhcmlhdGlvbm5hcHBlX2ludGVyYW5udWVsbGVcIiAgIFwib2ViX3RiaV92YXJpYXRpb25uYXBwZV9pbnRlcm1lbnN1ZWxsZXNcIlxuWzMxXSBcIm9lYl90YmlfdmFyaWF0aW9ubmFwcGVfbW9pc1wiICAgICAgICAgICAgXCJvZWJfdGJpX3ZhcmlhdGlvbm5hcHBlX3B6XCIgICAgICAgICAgICAgIFwib2ViX3RiaV92YXJpYXRpb25uYXBwZV90bXBcIiAgICAgICAgICAgIFxuWzM0XSBcInRiaV9pbWFnZV9lZmZlY3RpZmNvbXBsZXRcIiAgICAgICAgICAgICAgXCJ0YmlfaW1hZ2VfZXhwb3J0Y29tcGxldFwiICAgICAgICAgICAgICAgXG4ifQ== -->
+<pre><code> [1] &quot;aelb_eeme_ce_import&quot;                    &quot;aelb_eeme_es_import&quot;                    &quot;aelb_eeme_mece_description&quot;            
+ [4] &quot;aelb_eeme_mees_description&quot;             &quot;oeb_eau_alteration_hydromorphologique&quot;  &quot;oeb_eau_prelevement_eau_brute&quot;         
+ [7] &quot;oeb_eau_prelevement_eau_brute_commune&quot;  &quot;oeb_eau_prelevement_eau_brute_ouvrage&quot;  &quot;oeb_eau_qualite_biologique_ce&quot;         
+[10] &quot;oeb_eru&quot;                                &quot;oeb_eru_aglo&quot;                           &quot;oeb_eru_boue&quot;                          
+[13] &quot;oeb_eru_steu&quot;                           &quot;oeb_import_donneepe3b1&quot;                 &quot;oeb_surface_culture_rpg2016&quot;           
+[16] &quot;oeb_tbi_irep_consoind&quot;                  &quot;oeb_tbi_nappe_moy&quot;                      &quot;oeb_tbi_nitrate_eau_souterraine&quot;       
+[19] &quot;oeb_tbi_nitrate_eau_souterraine_site&quot;   &quot;oeb_tbi_nitrate_nappe&quot;                  &quot;oeb_tbi_niveaunappean&quot;                 
+[22] &quot;oeb_tbi_onde&quot;                           &quot;oeb_tbi_peb&quot;                            &quot;oeb_tbi_prelevement_tmp&quot;               
+[25] &quot;oeb_tbi_qualitebio&quot;                     &quot;oeb_tbi_qualitebio_tmp&quot;                 &quot;oeb_tbi_qualitebio_tmp2&quot;               
+[28] &quot;oeb_tbi_sispea&quot;                         &quot;oeb_tbi_variationnappe_interannuelle&quot;   &quot;oeb_tbi_variationnappe_intermensuelles&quot;
+[31] &quot;oeb_tbi_variationnappe_mois&quot;            &quot;oeb_tbi_variationnappe_pz&quot;              &quot;oeb_tbi_variationnappe_tmp&quot;            
+[34] &quot;tbi_image_effectifcomplet&quot;              &quot;tbi_image_exportcomplet&quot;               </code></pre>
+<!-- rnb-output-end -->
+<!-- rnb-chunk-end -->
+<!-- rnb-text-begin -->
+<!-- rnb-text-end -->
+<!-- rnb-chunk-begin -->
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuXG5kYl9waWV6b21ldHJlcyA8LSB0YmwoY29uX215c3FsX2xvY2FsLCBcIm9lYl90YmlfdmFyaWF0aW9ubmFwcGVfcHpcIilcblxuZGJfcGllem9tZXRyZXMgJT4lIHRhbGx5KCkgIzU2IHBpZXpvbWV0cmVzXG5gYGAifQ== -->
+<pre class="r"><code>
+db_piezometres &lt;- tbl(con_mysql_local, &quot;oeb_tbi_variationnappe_pz&quot;)
+
+db_piezometres %&gt;% tally() #56 piezometres</code></pre>
+<!-- rnb-source-end -->
+<!-- rnb-frame-begin eyJtZXRhZGF0YSI6eyJjbGFzc2VzIjpbInRibF9NeVNRTCIsInRibF9kYmkiLCJ0Ymxfc3FsIiwidGJsX2xhenkiLCJ0YmwiXSwibnJvdyI6W10sIm5jb2wiOjEsInN1bW1hcnkiOnsiU291cmNlIjpbImxhenkgcXVlcnkgWz8/IHggMV0iXSwiRGF0YWJhc2UiOlsibXlzcWwgIFtyb290QDovb2ViX3RiaV0iXX19LCJyZGYiOiJINHNJQUFBQUFBQUFCbTFReXdyQ01CRGNQcVVWUmZBL0NqN3hyaDhnbnJ6R3V0WkNUVW9hVUR6MXk2dmJOQUVKQnBMZG5jeHNkbkk2bkZmcE9RV0FBRUtJSUlnb2hYaC9YQ3czUzREUXA4cWptNlNQTDJMTk5RREJkSWg2N1J4aWxGZXNhU2laL1lCSnlSVVdLTGRyS2pwWHdka0RYWVhISFZZaXhUT3p6QWx0djZYalEyc2craCtuUTNwbGltVTNTWkkvajQ1RXJVckJxWm5mdTRwN2dYSGx1YU5JQnhqWEpiN0ZBNVhVdzFnZG1NRzg5aWNmZHY5MFlBZU1UWnNRODdzd2VZeThLRG5hSDZuWUJTdFRUTW00OXAzVmtyN1J1aU8weVpSUXpQTFNYRlFXMFg2aCt3SmtrOTVYNFFFQUFBPT0ifQ== -->
+<div data-pagedtable="false">
+<script data-pagedtable-source type="application/json">
+{"columns":[{"label":["n"],"name":[1],"type":["S3: integer64"],"align":["right"]}],"data":[{"1":"56"}],"options":{"columns":{"min":{},"max":[10],"total":[1]},"rows":{"min":[10],"max":[10],"total":["NA"]},"pages":{}}}
+  </script>
+</div>
+<!-- rnb-frame-end -->
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuXG5saXN0ZV9jb2Rlc19ic3MgPC0gZGJfcGllem9tZXRyZXMgJT4lIGNvbGxlY3QoKSAlPiVcbiAgc3VtbWFyaXNlKENvZGVfbmF0aW9uYWxfQlNTID0gc3RyX2ZsYXR0ZW4oQ29kZV9uYXRpb25hbF9CU1MsIGNvbGxhcHNlID0gXCIsXCIpKVxuXG5gYGAifQ== -->
+<pre class="r"><code>
+liste_codes_bss &lt;- db_piezometres %&gt;% collect() %&gt;%
+  summarise(Code_national_BSS = str_flatten(Code_national_BSS, collapse = &quot;,&quot;))
+</code></pre>
+<!-- rnb-source-end -->
+<!-- rnb-chunk-end -->
+<!-- rnb-text-begin -->
+<!-- rnb-text-end -->
+<!-- rnb-chunk-begin -->
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuXG4jIFLDqWN1cMOpcmF0aW9uIGRlcyBpbmZvcyBzdXIgbGVzIHN0YXRpb25zIGRlIG1lc3VyZVxucGF0aF9zdGF0aW9ucyA8LSBcImh0dHBzOi8vaHViZWF1LmVhdWZyYW5jZS5mci9hcGkvdjEvbml2ZWF1eF9uYXBwZXMvc3RhdGlvbnM/XCJcbnJlcXVlc3Rfc3RhdGlvbnMgPC0gR0VUKHVybCA9IHBhdGhfc3RhdGlvbnMsIFxuICAgICAgICAgICAgICAgcXVlcnkgPSBsaXN0KFxuICAgICAgICAgICAgICAgICBjb2RlX2Jzcz1saXN0ZV9jb2Rlc19ic3MsXG4gICAgICAgICAgICAgICAgIGZvcm1hdD0nanNvbicsXG4gICAgICAgICAgICAgICAgIHNpemU9JzIwMDAwJylcbiAgICAgICAgICAgICAgIClcblxucmVzcG9uc2Vfc3RhdGlvbnMgPC0gY29udGVudChyZXF1ZXN0X3N0YXRpb25zLCBhcyA9IFwidGV4dFwiLCBlbmNvZGluZyA9IFwiVVRGLThcIikgJT4lXG4gIGZyb21KU09OKGZsYXR0ZW4gPSBUUlVFKVxuXG5odWJlYXVfc3RhdGlvbnMgPC0gcmVzcG9uc2Vfc3RhdGlvbnMkZGF0YVxuXG5cbiMgUsOpY3Vww6lyYXRpb24gZGVzIG1lc3VyZXNcbnBhdGhfY2hyb25pcXVlcyA8LSBcImh0dHBzOi8vaHViZWF1LmVhdWZyYW5jZS5mci9hcGkvdjEvbml2ZWF1eF9uYXBwZXMvY2hyb25pcXVlcz9cIlxucmVxdWVzdF9jaHJvbmlxdWVzIDwtIEdFVCh1cmwgPSBwYXRoX2Nocm9uaXF1ZXMsIFxuICAgICAgICAgICAgICAgcXVlcnkgPSBsaXN0KFxuICAgICAgICAgICAgICAgICBjb2RlX2JzcyA9IGxpc3RlX2NvZGVzX2JzcyxcbiAgICAgICAgICAgICAgICAgZm9ybWF0ID0gJ2pzb24nLFxuICAgICAgICAgICAgICAgICBzaXplID0gJzIwMDAwJyxcbiAgICAgICAgICAgICAgICAgZGF0ZV9kZWJ1dCA9IHBhcmFtcyRkYXRlX2RlYnV0LFxuICAgICAgICAgICAgICAgICBkYXRlX2ZpbiA9IHBhcmFtcyRkYXRlX2ZpbilcbiAgICAgICAgICAgICAgIClcblxucmVzcG9uc2VfY2hyb25pcXVlcyA8LSBjb250ZW50KHJlcXVlc3RfY2hyb25pcXVlcywgYXMgPSBcInRleHRcIiwgZW5jb2RpbmcgPSBcIlVURi04XCIpICU+JVxuICBmcm9tSlNPTihmbGF0dGVuID0gVFJVRSlcblxuaHViZWF1X2Nocm9uaXF1ZXMgPC0gcmVzcG9uc2VfY2hyb25pcXVlcyRkYXRhXG5gYGAifQ== -->
+<pre class="r"><code>
+# Récupération des infos sur les stations de mesure
+path_stations &lt;- &quot;https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations?&quot;
+request_stations &lt;- GET(url = path_stations, 
+               query = list(
+                 code_bss=liste_codes_bss,
+                 format=&#39;json&#39;,
+                 size=&#39;20000&#39;)
+               )
+
+response_stations &lt;- content(request_stations, as = &quot;text&quot;, encoding = &quot;UTF-8&quot;) %&gt;%
+  fromJSON(flatten = TRUE)
+
+hubeau_stations &lt;- response_stations$data
+
+
+# Récupération des mesures
+path_chroniques &lt;- &quot;https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques?&quot;
+request_chroniques &lt;- GET(url = path_chroniques, 
+               query = list(
+                 code_bss = liste_codes_bss,
+                 format = &#39;json&#39;,
+                 size = &#39;20000&#39;,
+                 date_debut = params$date_debut,
+                 date_fin = params$date_fin)
+               )
+
+response_chroniques &lt;- content(request_chroniques, as = &quot;text&quot;, encoding = &quot;UTF-8&quot;) %&gt;%
+  fromJSON(flatten = TRUE)
+
+hubeau_chroniques &lt;- response_chroniques$data</code></pre>
+<!-- rnb-source-end -->
+<!-- rnb-chunk-end -->
+<!-- rnb-text-begin -->
+<p>Réponse de Hub’eau :</p>
+<ul>
+<li>Stations : OK, tous les résultats sont présents dans la réponse</li>
+<li>Chroniques : OK, il reste des résultats</li>
+</ul>
+<!-- rnb-text-end -->
+
+<div id="rmd-source-code">LS0tDQp0aXRsZTogIkludGVncmF0aW9uIGRlcyBkb25uw6llcyBwaWV6b21ldHJpcXVlcyINCm91dHB1dDogaHRtbF9ub3RlYm9vaw0KcGFyYW1zOg0KICByZXNlYXVfcGllem86ICcwNDAwMDAwMDIwJw0KICBkYXRlX2RlYnV0OiAyMDIxLTA1LTAxDQogIGRhdGVfZmluOiAyMDIxLTA1LTMxDQotLS0NCg0KYGBge3Igc2V0dXB9DQprbml0cjo6b3B0c19jaHVuayRzZXQoZWNobyA9IFRSVUUpDQpsaWJyYXJ5KHRpZHl2ZXJzZSkNCmxpYnJhcnkoREJJKSAjIHBvdXIgbGVzIGNvbm5leGlvbnMgYXV4IEJERA0KbGlicmFyeShSUG9zdGdyZVNRTCkgIyBkcml2ZXIgcG9zdGdyZXMNCmxpYnJhcnkoUk1hcmlhREIpICMgZHJpdmVyDQpsaWJyYXJ5KFJNeVNRTCkNCmxpYnJhcnkobHVicmlkYXRlKSAjIGNhbGN1bCBzdXIgbGVzIGRhdGVzDQoNCmxpYnJhcnkoaHR0cikgIw0KbGlicmFyeShqc29ubGl0ZSkNCg0KYGBgDQoNCmBgYHtyIGZvbmN0aW9uc30NCmFwaV9yZXBvbnNlIDwtIGZ1bmN0aW9uKHJlcXVlc3QpIHsNCiAgDQpjYXNlX3doZW4ocmVxdWVzdCRzdGF0dXNfY29kZT09MjAwIH4gIk9LLCB0b3VzIGxlcyByw6lzdWx0YXRzIHNvbnQgcHLDqXNlbnRzIGRhbnMgbGEgcsOpcG9uc2UiLA0KICAgICAgICAgIHJlcXVlc3Qkc3RhdHVzX2NvZGU9PTIwNiB+ICJPSywgaWwgcmVzdGUgZGVzIHLDqXN1bHRhdHMiLA0KICAgICAgICAgIHJlcXVlc3Qkc3RhdHVzX2NvZGU9PTQwMCB+ICJSZXF1w6p0ZSBpbmNvcnJlY3RlIiwNCiAgICAgICAgICAgIFRSVUUgfiAiQXV0cmUgcsOpcG9uc2UiKQ0KfQ0KYGBgDQoNCg0KYGBge3IgY29ubmV4aW9uX2JkfQ0KDQpjb25fbXlzcWxfbG9jYWwgPC0gZGJDb25uZWN0KG9kYmM6Om9kYmMoKSwgLmNvbm5lY3Rpb25fc3RyaW5nID0gIg0KICAgICAgICAgICAgICAgICAgICAgICAgICAgRHJpdmVyPXtNeVNRTCBPREJDIDguMCBVbmljb2RlIERyaXZlcn07DQogICAgICAgICAgICAgICAgICAgICAgICAgICB1c2VyID0gcm9vdDsNCiAgICAgICAgICAgICAgICAgICAgICAgICAgIHBhc3N3b3JkID0gcm9vdDsNCiAgICAgICAgICAgICAgICAgICAgICAgICAgIGRhdGFiYXNlID0gb2ViX3RiaTsNCiAgICAgICAgICAgICAgICAgICAgICAgICAgIGhvc3QgPSBsb2NhbGhvc3QiLA0KICAgIHRpbWVvdXQgPSAxMCkNCg0KZGJMaXN0VGFibGVzKGNvbl9teXNxbF9sb2NhbCkgIyBMaXN0ZXIgbGVzIHRhYmxlcyBkZSBsYSBiYXNlDQpgYGANCg0KYGBge3IgcGllem9tZXRyZXN9DQoNCmRiX3BpZXpvbWV0cmVzIDwtIHRibChjb25fbXlzcWxfbG9jYWwsICJvZWJfdGJpX3ZhcmlhdGlvbm5hcHBlX3B6IikNCg0KZGJfcGllem9tZXRyZXMgJT4lIHRhbGx5KCkgIzU2IHBpZXpvbWV0cmVzDQoNCmxpc3RlX2NvZGVzX2JzcyA8LSBkYl9waWV6b21ldHJlcyAlPiUgY29sbGVjdCgpICU+JQ0KICBzdW1tYXJpc2UoQ29kZV9uYXRpb25hbF9CU1MgPSBzdHJfZmxhdHRlbihDb2RlX25hdGlvbmFsX0JTUywgY29sbGFwc2UgPSAiLCIpKQ0KDQpgYGANCg0KYGBge3IgaHViZWF1fQ0KDQojIFLDqWN1cMOpcmF0aW9uIGRlcyBpbmZvcyBzdXIgbGVzIHN0YXRpb25zIGRlIG1lc3VyZQ0KcGF0aF9zdGF0aW9ucyA8LSAiaHR0cHM6Ly9odWJlYXUuZWF1ZnJhbmNlLmZyL2FwaS92MS9uaXZlYXV4X25hcHBlcy9zdGF0aW9ucz8iDQpyZXF1ZXN0X3N0YXRpb25zIDwtIEdFVCh1cmwgPSBwYXRoX3N0YXRpb25zLCANCiAgICAgICAgICAgICAgIHF1ZXJ5ID0gbGlzdCgNCiAgICAgICAgICAgICAgICAgY29kZV9ic3M9bGlzdGVfY29kZXNfYnNzLA0KICAgICAgICAgICAgICAgICBmb3JtYXQ9J2pzb24nLA0KICAgICAgICAgICAgICAgICBzaXplPScyMDAwMCcpDQogICAgICAgICAgICAgICApDQoNCnJlc3BvbnNlX3N0YXRpb25zIDwtIGNvbnRlbnQocmVxdWVzdF9zdGF0aW9ucywgYXMgPSAidGV4dCIsIGVuY29kaW5nID0gIlVURi04IikgJT4lDQogIGZyb21KU09OKGZsYXR0ZW4gPSBUUlVFKQ0KDQpodWJlYXVfc3RhdGlvbnMgPC0gcmVzcG9uc2Vfc3RhdGlvbnMkZGF0YQ0KDQoNCiMgUsOpY3Vww6lyYXRpb24gZGVzIG1lc3VyZXMNCnBhdGhfY2hyb25pcXVlcyA8LSAiaHR0cHM6Ly9odWJlYXUuZWF1ZnJhbmNlLmZyL2FwaS92MS9uaXZlYXV4X25hcHBlcy9jaHJvbmlxdWVzPyINCnJlcXVlc3RfY2hyb25pcXVlcyA8LSBHRVQodXJsID0gcGF0aF9jaHJvbmlxdWVzLCANCiAgICAgICAgICAgICAgIHF1ZXJ5ID0gbGlzdCgNCiAgICAgICAgICAgICAgICAgY29kZV9ic3MgPSBsaXN0ZV9jb2Rlc19ic3MsDQogICAgICAgICAgICAgICAgIGZvcm1hdCA9ICdqc29uJywNCiAgICAgICAgICAgICAgICAgc2l6ZSA9ICcyMDAwMCcsDQogICAgICAgICAgICAgICAgIGRhdGVfZGVidXQgPSBwYXJhbXMkZGF0ZV9kZWJ1dCwNCiAgICAgICAgICAgICAgICAgZGF0ZV9maW4gPSBwYXJhbXMkZGF0ZV9maW4pDQogICAgICAgICAgICAgICApDQoNCnJlc3BvbnNlX2Nocm9uaXF1ZXMgPC0gY29udGVudChyZXF1ZXN0X2Nocm9uaXF1ZXMsIGFzID0gInRleHQiLCBlbmNvZGluZyA9ICJVVEYtOCIpICU+JQ0KICBmcm9tSlNPTihmbGF0dGVuID0gVFJVRSkNCg0KaHViZWF1X2Nocm9uaXF1ZXMgPC0gcmVzcG9uc2VfY2hyb25pcXVlcyRkYXRhDQpgYGANCg0KUsOpcG9uc2UgZGUgSHViJ2VhdSA6DQoNCi0gU3RhdGlvbnMgOiBgciBhcGlfcmVwb25zZShyZXF1ZXN0X3N0YXRpb25zKWANCi0gQ2hyb25pcXVlcyA6IGByIGFwaV9yZXBvbnNlKHJlcXVlc3RfY2hyb25pcXVlcylgDQoNCg==</div>
 
 
 
