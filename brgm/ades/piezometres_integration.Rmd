@@ -1,0 +1,31 @@
+---
+title: "Integration des données piezometriques"
+output: html_notebook
+
+params:
+  reseau_piezo:'0400000020'
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(DBI) # pour les connexions aux BDD
+library(RPostgreSQL) # driver postgres
+library(RMariaDB) # driver
+library(RMySQL)
+library(lubridate)
+```
+
+```{r connexion_bd}
+
+con_mysql_local <- dbConnect(odbc::odbc(), .connection_string = "
+                           Driver={MySQL ODBC 8.0 Unicode Driver};
+                           user = root;
+                           password = root;
+                           database = oeb_ars_cyano;
+                           host = localhost",
+    timeout = 10)
+
+```
+
+

@@ -1,0 +1,353 @@
+---
+title: "Integration données ARS / cyanobactéries"
+output:
+  html_document:
+    df_print: paged
+params:
+  chemin_source: O:/01.BD_EAU/ARS/CYANOBACTERIES/SOURCE/Envois_ARS
+  actualisation: '2020'
+  seuil_denombrement: 100000
+  contexte: developpement
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(DBI) # pour les connexions aux BDD
+library(RPostgreSQL) # driver postgres
+library(RMariaDB) # driver
+library(RMySQL)
+library(lubridate)
+
+library("readxl")
+
+# La période de suivi des sites est du 15 juin au 15 septembre (92 jours). Le nb de jours de dépassement des seuils de dénombrement est calculé pour la période de suivi.
+
+debut_periode <- as.Date(paste0(params$actualisation,"-06-15", origin="1970-01-01"))
+fin_periode <- as.Date(paste0(params$actualisation,"-09-15", origin="1970-01-01"))
+periode <- interval(debut_periode,fin_periode) # Période de suivi à croiser avec les prélèvements
+```
+
+# Connexion à la base de données
+
+```{r connexion bd Eau}
+
+con_mysql_local <- dbConnect(odbc::odbc(), .connection_string = "
+                           Driver={MySQL ODBC 8.0 Unicode Driver};
+                           user = root;
+                           password = root;
+                           database = oeb_ars_cyano;
+                           host = localhost",
+    timeout = 10)
+
+con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
+                          Driver       = "PostgreSQL Unicode(x64)",
+                          servername   = "192.168.35.220",
+                          database     = "eau",
+                          UID          = "postgres",
+                          PWD          = "P0stgr3SQL@OEB!",
+                          Port         = 5432)
+  
+dbListTables(con_mysql_local) # Lister les tables de la base
+
+```
+# Import du fichier d'échanges
+
+```{r lecture_source}
+
+# Liste des fichiers dont le nom termine par l'année d'actualisation
+fichier <- list.files(params$chemin_source, pattern=paste0("_", params$actualisation))
+
+# Arrêt si plus d'un fichier correspondant au critère
+if (length(fichier)>1) {
+  print('Plusieurs fichiers source...')
+  ABORT_ABORT()
+}
+```
+
+- Source de la donnée : BED UE
+- Fournisseur : ARS
+- contact : Marie-Agnès PILARD, [marie-agnes.pilard@ars.sante.fr](mailto:marie-agnes.pilard@ars.sante.fr))
+- Dossier d'import : [`r params$chemin_source`](`r params$chemin_source`)
+- Fichier : [`r fichier`](`r paste0(params$chemin_source,'/',fichier)`)
+
+```{r sites de surveillance}
+db_site <- tbl(con_mysql_local, "ars_cyano_site") # Récupération de la table des sites connus dans la BDD
+
+# Lecture de l'onglet "Liste des sites" dans le fichier d'import Excel
+data_sites <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
+          sheet=paste0(params$actualisation,"_Liste des sites BZH"))%>% 
+  mutate(CdSiteSurv = as.character(`SIT - Code national`),
+         LbSiteSurv = as.character(`SIT - Nom`),
+         Commune = as.character(`PSV - Commune - Nom`),
+         CoordX = as.numeric(str_replace_all(`PSV - Coordonnées Lambert II - X`, "\\s+", "")),
+         CoordY = as.numeric(str_replace_all(`PSV - Coordonnées Lambert II - Y`, "\\s+", "")),
+         TypSitSurv = as.character(`SIT - Type d'eau CEE - Libellé`),
+         Source = 'ARS_Cyano',
+         Maj_OEB = format.Date(Sys.Date(),"%Y-%m-%d")
+         )%>%
+  select(CdSiteSurv,LbSiteSurv,Commune,CoordX,CoordY,TypSitSurv,Source,Maj_OEB)
+
+```
+
+
+## Résultats Toxines présents dans SISE-Baignade
+```{r donnees_toxines}
+
+# Lecture de l'onglet "Toxines" dans le fichier d'import Excel
+data_toxines <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
+          sheet=paste0(params$actualisation,"_Toxines"),
+          skip = 3)%>%  # Le tableau commence à la 4ème ligne
+  rename_with(~str_remove(., ' TOTALE'))%>% # Retirer le suffixe ' TOTALE' qui est présent sur (certains) noms de colonne
+  mutate(CdSiteSurv = as.character(`SIT - Code national`),
+         DatePrel = `PLV Date`,
+         CdPrel = as.character(`PLV Code`),
+         `Présence de toxine` = (`SOMME DES MICROCYSTINES ANALYSÉES` > 0 
+                                 | `ANATOXINE A` > 0
+                                 | `CYLINDROSPERMOPSINE` > 0
+                                 | `SAXITOXINE` > 0) # TRUE si au moins une toxine détectée
+         )%>%
+  select(CdSiteSurv, 
+         DatePrel, 
+         CdPrel,
+         `Concentration en SOMME DES MICROCYSTINES` = `SOMME DES MICROCYSTINES ANALYSÉES`, 
+         `Concentration en ANATOXINE A` = `ANATOXINE A`, 
+         `Concentration en CYLINDROSPERMOPSINE` = `CYLINDROSPERMOPSINE`, 
+         `Concentration en SAXITOXINE` = `SAXITOXINE`, 
+         `Présence de toxine`) # Sélection des colonnes
+
+# Transformation en un tableau long (par série de donnée)
+series_toxines <- data_toxines %>%
+  gather(key="Serie", value="resultat",-CdSiteSurv, -DatePrel, -CdPrel)%>%
+  mutate(unite = case_when(
+      Serie == "Présence de toxine" ~ "-",
+      TRUE                          ~ "µg/l"
+    ))
+
+# Synthèse des données à importer
+
+data_toxines %>%
+  left_join(db_site, by = "CdSiteSurv", copy = TRUE)%>%
+# filter(CdSiteSurv == 35000870)%>%
+  summarise("Nombre de sites" = n_distinct(CdSiteSurv),
+            "Sites connus" = n_distinct(LbSiteSurv),
+            "Nombre de prélèvements" = n_distinct(CdPrel),
+            "Dernier" = max(DatePrel),
+            "Détexions de toxines" = sum(`Présence de toxine`),
+            "Sites avec détexion" = n_distinct(CdSiteSurv[`Présence de toxine`])
+  )
+
+```
+# Denombrements
+
+```{r}
+
+# Lecture de l'onglet "Denombrements" dans le fichier d'import Excel
+series_denombrements <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
+          sheet=paste0(params$actualisation,"_Dénombrements Cyanos"), # Nom de l'onglet : ANNEE_Dénombrement Cyanos
+          skip = 4, # Le tableau commence à la 5ème ligne
+          )%>% 
+  rename_at(vars(contains("traduite")), ~"RESULT - Valeur traduite")%>% # Renommage des noms de colonnes instables
+  mutate(CdSiteSurv = as.character(`SIT - Code national`),
+         DatePrel = `PLV - Date`,
+         CdPrel = as.character(`PLV - Code`),
+         Serie = "Nombre de cellules de cyanobactéries",
+         resultat = as.integer(str_replace_all(`RESULT - Valeur traduite`, "\\s+", "")), # Suppression des espaces séparateurs de milliers
+         unite = `ANA - Param. - Unité`) %>%
+  select(CdSiteSurv, 
+         DatePrel, 
+         CdPrel,
+         Serie,
+         resultat, 
+         unite)%>%
+  group_by(CdSiteSurv) %>% # Regroupement par site de surveillance pour le calcul des intervalles de temps entre deux prélèvements
+  arrange(DatePrel) %>% # Par ordre chronologique
+  mutate(`nbjours_Sup_100000` = case_when(
+           resultat > params$seuil_denombrement ~ intersect(
+               interval(DatePrel,lead(DatePrel, default = fin_periode)), 
+               periode
+             )/days(1), # Intervalle (jours) entre un prélèvement dépassant le seuil et le suivant, pendant la période de suivi
+           TRUE ~ 0 # ou 0 jours si le prélèvement ne dépasse pas le seuil
+           ))%>%
+  ungroup()
+
+# Synthèse des données importées
+series_denombrements%>%
+  left_join(db_site, by = "CdSiteSurv", copy = TRUE)%>%
+  filter(CdSiteSurv == 29001857)%>%
+  summarise("Nombre de sites" = n_distinct(CdSiteSurv),
+            "Sites connus" = n_distinct(LbSiteSurv),
+            "Nombre de prélèvements" = n_distinct(CdPrel),
+            "Dernier" = max(DatePrel),
+            "Nb dépassements" = sum(resultat>100000),
+            "Sites avec dépassement" = n_distinct(CdSiteSurv[resultat>100000]),
+            "Denombrement max" = max(resultat),
+            "Nb jours cumulés" = sum(nbjours_Sup_100000,na.rm = TRUE),
+  )
+         
+```
+
+
+# table resultats
+
+```{r}
+
+# Table regroupant les résultats de prélèvements (dénombrements + toxines)
+series_resultats <- series_denombrements %>%
+  rename("Nombre de cellules de cyanobactéries" = "resultat") %>%
+  select(-Serie) %>%
+  gather(key = "Serie", value="resultat", -CdSiteSurv, -CdPrel, -DatePrel, -unite)%>%
+  mutate(unite = case_when(
+      Serie == "Nombre de cellules de cyanobactéries" ~ "n(cellules)/mL",
+      TRUE                          ~ "nb jours"
+    ))%>%
+union(series_toxines)
+```
+
+# Interdictions
+
+```{r}
+# Modification du nom de l'onglet depuis 2020 : Fermetures > Interdictions
+if (params$actualisation == '2019') {
+  onglet_interdiction <- "_Fermetures Détail"
+  } else {
+  onglet_interdiction <- "_Interdictions Détail"
+  }
+
+# Lecture de l'onglet "Interdiction" dans le fichier d'échange Excel
+data_interdictions <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
+          sheet=paste0(params$actualisation,onglet_interdiction), # Nom de l'onglet : ANNEE_Fermetures Détail
+          skip = 4, # Le tableau commence à la 5ème ligne
+          )%>%
+  mutate(CdSiteSurv = as.character(`SIT - Code national`),
+         Date_debut = as.Date(`INT - Date de début`),
+         Date_fin = as.Date(`INT - Date de fin`),
+         CdPrel = paste0(format(`INT - Date de début`,"%d/%m")," > ",format(`INT - Date de fin`,"%d/%m/%y")),
+         nb_jours_interdiction = interval(Date_debut,Date_fin)/days(1),
+         nb_jours_interdiction_periode = intersect(interval(Date_debut,Date_fin),periode)/days(1))%>% # identifiant de la fermeture au format : "21/06 > 30/06"
+  select(CdSiteSurv,Date_debut,Date_fin,nb_jours_interdiction,nb_jours_interdiction_periode)
+
+# Création d'une ligne par jour d'interdiction
+jours_interdiction <- data_interdictions %>%
+  mutate(CdPrel = paste0(format(Date_debut,"%d/%m")," > ",format(Date_fin,"%d/%m/%y")), # identifiant de la fermeture au format : "21/06 > 30/06"
+         Serie = "Nombre de jours d'interdiction baignade",
+         unite = "nb jours")%>%
+  group_by(CdSiteSurv, CdPrel, Serie) %>%
+  group_modify(~ {DatePrel <- seq.Date(from = .x$Date_debut, to = .x$Date_fin-1, by = 1L) 
+                 crossing(DatePrel)})%>%
+  mutate(resultat = 1,
+         unite = "nb jours")%>%
+  ungroup()
+```
+
+# Ecriture dans la base 
+
+## Insertions
+
+```{r insertion}
+
+# Fonction d'insertion des données (plus récentes que celles en base)
+# TODO utiliser plutôt une comparaison des jeux de données sur les clés multiples
+
+db.insertion <- function(con,table,data) {
+  
+  #con <- con_mysql_local
+  #base<-"oeb_ars_cyano"
+  #table<-"ars_fermeture"
+  #data<-jours_interdiction
+  
+  # Date de la dernière donnée en base
+  DatePrel_max <- tbl(con, table) %>% summarise(DatePrel_max = max(DatePrel)) %>% pull(DatePrel_max)
+  
+  # Données plus récentes à insérer
+  data <- data %>% filter(DatePrel > DatePrel_max)
+  
+  # Existe-t-il des données à insérer ?
+if (isTRUE(data %>% tally() > 0)) {
+  
+  # Insertion des nouvelles lignes
+  dbWriteTable(con, table, data, overwrite=FALSE, append=TRUE)
+  
+  # Horodate en commentaire
+mise_a_jour <- paste0(format.Date(Sys.Date(),"%d/%m/%Y"), " : Actualisation ",params$actualisation)
+
+dbGetQuery(con_mysql_local, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
+
+paste0("Données insérées : ",data%>%tally)
+
+}
+  else {
+    
+    paste0("Aucune donnée à insérer depuis le ", format.Date(DatePrel_max,"%d/%m/%Y"))
+  
+    }
+  
+} # fin db.insertion
+
+# Ecriture en base, en fonction du contexte developpement/production
+
+if(params$contexte == "production") {
+  
+  db.insertion(con_mysql_local,"ars_toxines",series_toxines)
+  
+  db.insertion(con_mysql_local,"ars_denombrement",series_denombrements)
+  
+  db.insertion(con_mysql_local,"ars_fermeture",jours_interdiction)
+  
+  
+  } else if (params$contexte == "developpement") {
+    
+  dbWriteTable(con_postgresql_dev, SQL("ars_cyano.t_sites_sit"), data_sites, overwrite=TRUE)
+    
+  dbWriteTable(con_postgresql_dev, SQL("ars_cyano.t_toxines_tox"), series_toxines, overwrite=TRUE)
+  
+  series_denombrements %>%
+    mutate(Serie="Nombres de jours > 100000 cellules",
+           resultat=nbjours_Sup_100000,
+           unite="nb jours")%>%
+  union(series_denombrements)%>%
+    select(-nbjours_Sup_100000)%>% { 
+  dbWriteTable(con_postgresql_dev, SQL("ars_cyano.t_denombrement_den"), ., overwrite=TRUE) 
+    }
+  
+  dbWriteTable(con_postgresql_dev, SQL("ars_cyano.t_interdiction_int"), data_interdictions, overwrite=TRUE) 
+  
+  
+    
+  } else {
+    
+    print('Pas d\'écriture dans la base (params$context != production)')  
+    
+  }
+
+```
+# Verification
+
+## SQL
+
+```{sql connection=con_mysql_local}
+
+SELECT 'Fermetures', count(*), max(DatePrel), count(distinct CdPrel) FROM oeb_ars_cyano.ars_fermeture
+UNION
+SELECT 'Toxines', count(*), max(DatePrel), count(distinct CdPrel) FROM oeb_ars_cyano.ars_toxines
+UNION
+SELECT 'Denombrements', count(*), max(DatePrel), count(distinct CdPrel) FROM oeb_ars_cyano.ars_denombrement ;
+
+```
+
+```{sql connection=con_postgresql_dev}
+
+SELECT 'Fermetures', count(*), max(DatePrel), count(distinct CdPrel) FROM ars.t_interdiction_int
+UNION
+SELECT 'Toxines', count(*), max(DatePrel), count(distinct CdPrel) FROM ars_cyano.ars_toxines
+UNION
+SELECT 'Denombrements', count(*), max(DatePrel), count(distinct CdPrel) FROM oeb_ars_cyano.ars_denombrement ;
+
+```
+
+# Export du fichier pour la carto
+```{r}
+
+```
+
+
