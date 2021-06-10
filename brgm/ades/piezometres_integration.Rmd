@@ -5,6 +5,7 @@ params:
   reseau_piezo: '0400000020'
   date_debut: 2021-05-01
   date_fin: 2021-05-31
+  pagination: 100
 ---
 
 ```{r setup}
@@ -29,6 +30,45 @@ case_when(request$status_code==200 ~ "OK, tous les résultats sont présents dan
           request$status_code==400 ~ "Requête incorrecte",
             TRUE ~ "Autre réponse")
 }
+
+
+get_hubeau <- function(path, query) {
+  
+  response <- GET(url = path, query = query) %>% 
+  content(as = "text", encoding = "UTF-8") %>%
+  fromJSON(flatten = TRUE)
+  
+data = response$data
+
+if(response$count > query$size) {
+  
+pages <- ceiling(response$count/query$size)
+
+pb <- winProgressBar(title = "Récupération des chroniques", min = 0,
+                     max = pages, width = 300)
+
+for(i in 2:pages){
+  
+  query$page <- i
+  
+  response_i <- GET(url = path, query = query) %>% 
+  content(as = "text", encoding = "UTF-8") %>%
+  fromJSON(flatten = TRUE)
+  
+data <- rbind(data, response_i$data)
+
+setWinProgressBar(pb, i, title=paste( round(i/pages*100, 0), "% chargé"))
+
+}
+
+close(pb)
+
+}
+
+return(data)
+  }
+
+
 ```
 
 
@@ -59,39 +99,29 @@ liste_codes_bss <- db_piezometres %>% collect() %>%
 ```{r hubeau}
 
 # Récupération des infos sur les stations de mesure
-path_stations <- "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations?"
-request_stations <- GET(url = path_stations, 
-               query = list(
-                 code_bss=liste_codes_bss,
-                 format='json',
-                 size='20000')
-               )
 
-response_stations <- content(request_stations, as = "text", encoding = "UTF-8") %>%
-  fromJSON(flatten = TRUE)
+query_stations = list(
+  code_bss=liste_codes_bss,
+  format='json',
+  size=params$pagination
+  )
 
-hubeau_stations <- response_stations$data
-
+hubeau_stations <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations?", query = query_stations)
 
 # Récupération des mesures
-path_chroniques <- "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques?"
-request_chroniques <- GET(url = path_chroniques, 
-               query = list(
+
+query_chroniques = list(
                  code_bss = liste_codes_bss,
                  format = 'json',
-                 size = '20000',
-                 date_debut = params$date_debut,
-                 date_fin = params$date_fin)
-               )
+                 size = params$pagination,
+                 date_debut_mesure = params$date_debut,
+                 date_fin_mesure = params$date_fin)
 
-response_chroniques <- content(request_chroniques, as = "text", encoding = "UTF-8") %>%
-  fromJSON(flatten = TRUE)
-
-hubeau_chroniques <- response_chroniques$data
+hubeau_chroniques <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques?", query=query_chroniques)
 ```
 
 Réponse de Hub'eau :
 
-- Stations : `r api_reponse(request_stations)`
-- Chroniques : `r api_reponse(request_chroniques)`
+- Stations : 
+- Chroniques : 
 
