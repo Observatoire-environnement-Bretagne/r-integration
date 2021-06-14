@@ -10,6 +10,7 @@ params:
 
 ```{r setup}
 knitr::opts_chunk$set(echo = TRUE)
+library(config) # Utilisation d'un fichier de configuration, cf  https://db.rstudio.com/best-practices/managing-credentials/#stored-in-a-file-with-config
 library(tidyverse)
 library(DBI) # pour les connexions aux BDD
 library(RPostgreSQL) # driver postgres
@@ -107,11 +108,15 @@ paste0("Données insérées : ",data%>%tally)
 
 ```{r connexion_bd}
 
-con_mysql_local <- dbConnect(odbc::odbc(), .connection_string = "
-                           Driver={MySQL ODBC 8.0 Unicode Driver}
-                           database = oeb_piezo_variation_nappes;
-                           host = localhost",
-    timeout = 10)
+conf <- config::get("mysql_local")
+
+con_mysql_local <- dbConnect(odbc::odbc(),
+                             Driver=conf$driver,
+                             host = conf$server,
+                             UID = conf$uid,
+                             PWD = conf$pwd,
+                             timeout = 10,
+                             database = "oeb_piezo_variation_nappes")
 
 dbListTables(con_mysql_local) # Lister les tables de la base
 ```

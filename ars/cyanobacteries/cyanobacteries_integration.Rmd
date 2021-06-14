@@ -10,6 +10,7 @@ params:
 
 ```{r setup}
 knitr::opts_chunk$set(echo = TRUE)
+library(config) # Utilisation d'un fichier de configuration, cf  https://db.rstudio.com/best-practices/managing-credentials/#stored-in-a-file-with-config
 library(tidyverse)
 library(DBI) # pour les connexions aux BDD
 library(RPostgreSQL) # driver postgres
@@ -30,18 +31,25 @@ periode <- interval(debut_periode,fin_periode) # Période de suivi à croiser av
 
 ```{r connexion bd Eau}
 
-con_mysql_local <- dbConnect(odbc::odbc(), .connection_string = "
-                           Driver={MySQL ODBC 8.0 Unicode Driver}
-                           database = oeb_ars_cyano;
-                           host = localhost",
-    timeout = 10)
+conf <- config::get("mysql_local")
+
+con_mysql_local <- dbConnect(odbc::odbc(),
+                             Driver=mysql_local$driver,
+                             host = mysql_local$server,
+                             UID = mysql_local$uid,
+                             PWD = mysql_local$pwd,
+                             database = "oeb_ars_cyano")
+
+conf <- config::get("postgres_dev")
 
 con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
-                          Driver       = "PostgreSQL Unicode(x64)",
-                          servername   = "192.168.35.220",
-                          database     = "eau",
-                          UID          = "postgres",
-                          Port         = 5432)
+                          Driver       = conf$driver,
+                          servername   = conf$server,
+                          UID = conf$uid,
+                          PWD = conf$pwd,
+                          Port = conf$port,
+                          database = conf$database)
+
   
 dbListTables(con_mysql_local) # Lister les tables de la base
 
