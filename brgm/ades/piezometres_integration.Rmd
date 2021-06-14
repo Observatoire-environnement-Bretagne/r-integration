@@ -5,7 +5,7 @@ params:
   reseau_piezo: '0400000020'
   date_debut: 2021-05-01
   date_fin: 2021-05-31
-  pagination: 100
+  pagination: 5000
 ---
 
 ```{r setup}
@@ -23,6 +23,7 @@ library(jsonlite)
 ```
 
 ```{r fonctions}
+# Fonction pour traduire la réponse de l'API
 api_reponse <- function(request) {
   
 case_when(request$status_code==200 ~ "OK, tous les résultats sont présents dans la réponse",
@@ -31,6 +32,7 @@ case_when(request$status_code==200 ~ "OK, tous les résultats sont présents dan
             TRUE ~ "Autre réponse")
 }
 
+# Fonction pour requêter l'API Hub'Eau
 
 get_hubeau <- function(path, query) {
   
@@ -38,12 +40,13 @@ get_hubeau <- function(path, query) {
   content(as = "text", encoding = "UTF-8") %>%
   fromJSON(flatten = TRUE)
   
-data = response$data
+data = response$data # Le jeu de données est dans l'objet "data"
 
-if(response$count > query$size) {
+if(response$count > query$size) { # Si la taille de page est plus petite que le nb de résultats, faire une boucle pour les pages suivantes
   
 pages <- ceiling(response$count/query$size)
 
+# Affichage d'une barre de progression
 pb <- winProgressBar(title = "Récupération des chroniques", min = 0,
                      max = pages, width = 300)
 
@@ -54,31 +57,59 @@ for(i in 2:pages){
   response_i <- GET(url = path, query = query) %>% 
   content(as = "text", encoding = "UTF-8") %>%
   fromJSON(flatten = TRUE)
-  
-data <- rbind(data, response_i$data)
 
-setWinProgressBar(pb, i, title=paste( round(i/pages*100, 0), "% chargé"))
+data <- rbind(data, response_i$data) # Concaténation des lignes récupérées
 
-}
+setWinProgressBar(pb, i, title=paste( round(i/pages*100, 0), "% chargé")) # Avancement de la barre de progression
+
+} # Fin boucle for
 
 close(pb)
 
-}
+} # Fin if
 
 return(data)
-  }
+  } # Fin get_hubeau
 
+# Insertion de données
 
+db.insertion <- function(con,table,data) {
+  
+  # Date de la dernière donnée en base
+  Date_max <- tbl(con, table) %>% summarise(Date_max = max(Date_de_la_mesure, na.rm = TRUE)) %>% pull(Date_max)
+  
+  # Données plus récentes à insérer
+  data <- data %>% filter(Date_de_la_mesure > Date_max)
+  
+  # Existe-t-il des données à insérer ?
+if (isTRUE(data %>% tally() > 0)) {
+  
+  # Insertion des nouvelles lignes
+  dbWriteTable(con, table, data, overwrite=TRUE, append=FALSE)
+  
+  # Horodate en commentaire
+mise_a_jour <- paste0(format.Date(Sys.Date(),"%d/%m/%Y"), " : Actualisation ",params$actualisation)
+
+dbGetQuery(con_mysql_local, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
+
+paste0("Données insérées : ",data%>%tally)
+
+}
+  else {
+    
+    paste0("Aucune donnée à insérer depuis le ", format.Date(Date_max,"%d/%m/%Y"))
+  
+    }
+  
+} # fin db.insertion
 ```
 
 
 ```{r connexion_bd}
 
 con_mysql_local <- dbConnect(odbc::odbc(), .connection_string = "
-                           Driver={MySQL ODBC 8.0 Unicode Driver};
-                           user = root;
-                           password = root;
-                           database = oeb_tbi;
+                           Driver={MySQL ODBC 8.0 Unicode Driver}
+                           database = oeb_piezo_variation_nappes;
                            host = localhost",
     timeout = 10)
 
@@ -86,13 +117,14 @@ dbListTables(con_mysql_local) # Lister les tables de la base
 ```
 
 ```{r piezometres}
+# Recupération de la liste des piézomètres du réseau breton dans la base de données
 
-db_piezometres <- tbl(con_mysql_local, "oeb_tbi_variationnappe_pz")
+db_piezometres <- tbl(con_mysql_local, "oeb_tbi_variationnappe_pz") # Lecture de la table des piezometres
 
 db_piezometres %>% tally() #56 piezometres
 
 liste_codes_bss <- db_piezometres %>% collect() %>%
-  summarise(Code_national_BSS = str_flatten(Code_national_BSS, collapse = ","))
+  summarise(Code_national_BSS = str_flatten(Code_national_BSS, collapse = ",")) # Liste des piezometres pour la requete
 
 ```
 
@@ -100,16 +132,19 @@ liste_codes_bss <- db_piezometres %>% collect() %>%
 
 # Récupération des infos sur les stations de mesure
 
+# Liste des paramètres de la requête
 query_stations = list(
   code_bss=liste_codes_bss,
   format='json',
   size=params$pagination
   )
 
+# Requête des stations
 hubeau_stations <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations?", query = query_stations)
 
-# Récupération des mesures
+# Récupération des chroniques
 
+# Liste des paramètres de la requête
 query_chroniques = list(
                  code_bss = liste_codes_bss,
                  format = 'json',
@@ -117,6 +152,7 @@ query_chroniques = list(
                  date_debut_mesure = params$date_debut,
                  date_fin_mesure = params$date_fin)
 
+# Requête des chroniques
 hubeau_chroniques <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques?", query=query_chroniques)
 ```
 
@@ -124,4 +160,48 @@ Réponse de Hub'eau :
 
 - Stations : 
 - Chroniques : 
+
+```{r}
+hubeau_chroniques %>%
+  ggplot(aes(date_mesure, profondeur_nappe, color=code_bss, group_by(code_bss)))+
+  geom_point()
+```
+
+```{r table oeb_tbi_variationnappe_tmp}
+
+# Reconstitution de la table d'integration
+oeb_tbi_variationnappe_tmp <- hubeau_chroniques %>%
+  left_join(hubeau_stations, by="code_bss")%>% 
+  mutate(
+Date_de_la_mesure = as.POSIXct(timestamp_mesure/1000, origin="1970-01-01", tz = "UTC"),
+Code_qualification = 1,
+Profondeur_d_but_site_de_mesure = NA,
+Profondeur_fin_site_de_mesure = NA,
+Mois = format.Date(date_mesure,"%m"),
+Annee = format.Date(date_mesure,"%Y"),
+Dateintegration = format.Date(Sys.Date(),"%Y-%m-%d")) %>%
+    select(
+Code_national_BSS = code_bss,
+Date_de_la_mesure,
+Profondeur_relative_rep_re_de_mesure = profondeur_nappe,
+C_te_NGF = niveau_nappe_eau,
+Code_qualification,
+Qualification_de_la_mesure = qualification,
+Continuit_ = nom_continuite,
+Mode_obtention = mode_obtention,
+Statut_de_la_mesure = statut,
+Profondeur_d_but_site_de_mesure,
+Profondeur_fin_site_de_mesure,
+X_WGS84 = x,
+Y_WGS84 = y,
+Producteur_de_donn_es = nom_producteur,
+Mois,
+Annee,
+Dateintegration)
+```
+
+```{r}
+db.insertion(con = con_mysql_local, table = "oeb_tbi_variationnappe", data = oeb_tbi_variationnappe_tmp)
+```
+
 

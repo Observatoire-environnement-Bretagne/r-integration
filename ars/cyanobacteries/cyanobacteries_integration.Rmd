@@ -1,8 +1,6 @@
 ---
 title: "Integration données ARS / cyanobactéries"
-output:
-  html_document:
-    df_print: paged
+output: html_notebook
 params:
   chemin_source: O:/01.BD_EAU/ARS/CYANOBACTERIES/SOURCE/Envois_ARS
   actualisation: '2020'
@@ -33,9 +31,7 @@ periode <- interval(debut_periode,fin_periode) # Période de suivi à croiser av
 ```{r connexion bd Eau}
 
 con_mysql_local <- dbConnect(odbc::odbc(), .connection_string = "
-                           Driver={MySQL ODBC 8.0 Unicode Driver};
-                           user = root;
-                           password = root;
+                           Driver={MySQL ODBC 8.0 Unicode Driver}
                            database = oeb_ars_cyano;
                            host = localhost",
     timeout = 10)
@@ -45,7 +41,6 @@ con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
                           servername   = "192.168.35.220",
                           database     = "eau",
                           UID          = "postgres",
-                          PWD          = "P0stgr3SQL@OEB!",
                           Port         = 5432)
   
 dbListTables(con_mysql_local) # Lister les tables de la base
