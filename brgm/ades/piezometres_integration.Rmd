@@ -21,9 +21,6 @@ library(lubridate) # calcul sur les dates
 library(httr) #
 library(jsonlite)
 
-```
-
-```{r fonctions}
 # Fonction pour traduire la réponse de l'API
 api_reponse <- function(request) {
   
@@ -165,6 +162,17 @@ Réponse de Hub'eau :
 
 - Stations : 
 - Chroniques : 
+
+```{r}
+all_equal(db_piezometres, hubeau_stations)
+
+db_piezometres %>% collect() %>%
+  left_join(hubeau_stations, by=c("Code_national_BSS" = "code_bss"))%>%
+  filter(is.na(bss_id))%>%
+  select(Code_national_BSS)
+  
+```
+
 
 ```{r}
 hubeau_chroniques %>%

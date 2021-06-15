@@ -3,7 +3,7 @@ title: "Integration données ARS / cyanobactéries"
 output: html_notebook
 params:
   chemin_source: O:/01.BD_EAU/ARS/CYANOBACTERIES/SOURCE/Envois_ARS
-  actualisation: '2020'
+  actualisation: '2018'
   seuil_denombrement: 100000
   contexte: developpement
 ---
@@ -25,6 +25,44 @@ library("readxl")
 debut_periode <- as.Date(paste0(params$actualisation,"-06-15", origin="1970-01-01"))
 fin_periode <- as.Date(paste0(params$actualisation,"-09-15", origin="1970-01-01"))
 periode <- interval(debut_periode,fin_periode) # Période de suivi à croiser avec les prélèvements
+
+# Fonction d'insertion des données (plus récentes que celles en base)
+# TODO utiliser plutôt une comparaison des jeux de données sur les clés multiples
+
+db.insertion <- function(con,table,data) {
+  
+  #con <- con_mysql_local
+  #base<-"oeb_ars_cyano"
+  #table<-"ars_fermeture"
+  #data<-jours_interdiction
+  
+  # Date de la dernière donnée en base
+  DatePrel_max <- tbl(con, table) %>% summarise(DatePrel_max = max(DatePrel)) %>% pull(DatePrel_max)
+  
+  # Données plus récentes à insérer
+  data <- data %>% filter(DatePrel > DatePrel_max)
+  
+  # Existe-t-il des données à insérer ?
+if (isTRUE(data %>% tally() > 0)) {
+  
+  # Insertion des nouvelles lignes
+  dbWriteTable(con, table, data, overwrite=FALSE, append=TRUE)
+  
+  # Horodate en commentaire
+mise_a_jour <- paste0(format.Date(Sys.Date(),"%d/%m/%Y"), " : Actualisation ",params$actualisation)
+
+dbGetQuery(con_mysql_local, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
+
+paste0("Données insérées : ",data%>%tally)
+
+}
+  else {
+    
+    paste0("Aucune donnée à insérer depuis le ", format.Date(DatePrel_max,"%d/%m/%Y"))
+  
+    }
+  
+} # fin db.insertion
 ```
 
 # Connexion à la base de données
@@ -34,10 +72,10 @@ periode <- interval(debut_periode,fin_periode) # Période de suivi à croiser av
 conf <- config::get("mysql_local")
 
 con_mysql_local <- dbConnect(odbc::odbc(),
-                             Driver=mysql_local$driver,
-                             host = mysql_local$server,
-                             UID = mysql_local$uid,
-                             PWD = mysql_local$pwd,
+                             Driver=conf$driver,
+                             host = conf$server,
+                             UID = conf$uid,
+                             PWD = conf$pwd,
                              database = "oeb_ars_cyano")
 
 conf <- config::get("postgres_dev")
@@ -91,6 +129,18 @@ data_sites <- read_xlsx(paste0(params$chemin_source,'/',fichier),
          )%>%
   select(CdSiteSurv,LbSiteSurv,Commune,CoordX,CoordY,TypSitSurv,Source,Maj_OEB)
 
+```
+# Commentaires sur les suivis des sites
+
+```{r observations}
+data_observations <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
+          sheet=paste0(params$actualisation,"_Liste des sites BZH"))%>% 
+  mutate(CdSiteSurv = as.character(`SIT - Code national`),
+         Observations = as.character(`Observations`),
+         Annee = params$actualisation,
+         Maj_OEB = format.Date(Sys.Date(),"%Y-%m-%d")
+         )%>%
+  select(CdSiteSurv,Annee,Observations,Maj_OEB)
 ```
 
 
@@ -189,8 +239,6 @@ series_denombrements%>%
   )
          
 ```
-
-
 # table resultats
 
 ```{r}
@@ -249,44 +297,6 @@ jours_interdiction <- data_interdictions %>%
 
 ```{r insertion}
 
-# Fonction d'insertion des données (plus récentes que celles en base)
-# TODO utiliser plutôt une comparaison des jeux de données sur les clés multiples
-
-db.insertion <- function(con,table,data) {
-  
-  #con <- con_mysql_local
-  #base<-"oeb_ars_cyano"
-  #table<-"ars_fermeture"
-  #data<-jours_interdiction
-  
-  # Date de la dernière donnée en base
-  DatePrel_max <- tbl(con, table) %>% summarise(DatePrel_max = max(DatePrel)) %>% pull(DatePrel_max)
-  
-  # Données plus récentes à insérer
-  data <- data %>% filter(DatePrel > DatePrel_max)
-  
-  # Existe-t-il des données à insérer ?
-if (isTRUE(data %>% tally() > 0)) {
-  
-  # Insertion des nouvelles lignes
-  dbWriteTable(con, table, data, overwrite=FALSE, append=TRUE)
-  
-  # Horodate en commentaire
-mise_a_jour <- paste0(format.Date(Sys.Date(),"%d/%m/%Y"), " : Actualisation ",params$actualisation)
-
-dbGetQuery(con_mysql_local, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
-
-paste0("Données insérées : ",data%>%tally)
-
-}
-  else {
-    
-    paste0("Aucune donnée à insérer depuis le ", format.Date(DatePrel_max,"%d/%m/%Y"))
-  
-    }
-  
-} # fin db.insertion
-
 # Ecriture en base, en fonction du contexte developpement/production
 
 if(params$contexte == "production") {
@@ -296,6 +306,8 @@ if(params$contexte == "production") {
   db.insertion(con_mysql_local,"ars_denombrement",series_denombrements)
   
   db.insertion(con_mysql_local,"ars_fermeture",jours_interdiction)
+  
+  dbWriteTable(con_mysql_local,"ars_site_observations", data_observations, append=TRUE, fileEncoding="System")
   
   
   } else if (params$contexte == "developpement") {
