@@ -1,0 +1,168 @@
+---
+title: "Intégration des données PC Lyxea"
+output: html_notebook
+params:  
+  chemin_source: 'O:\02.TRAITEMENTS\VMEAU\EAU\STANDARDISATION\DREAL'
+  fichier_import: 'ouestco_complement.sql'
+  annee_debut: '2020'
+  annee_fin: '2020'
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+library(config) # Utilisation d'un fichier de configuration, cf  https://db.rstudio.com/best-practices/managing-credentials/#stored-in-a-file-with-config
+library(tidyverse)
+library(DBI) # pour les connexions aux BDD
+library(RPostgres) # driver postgres
+library(RMariaDB) # driver
+library(RMySQL)
+library(lubridate) # calcul sur les dates
+library(mice) # Gestion des données manquantes
+library(httr) #
+library(jsonlite)
+
+suffixe <- if(params$annee_fin == params$annee_debut) paste("",params$annee_debut, sep="_") else paste("",params$annee_debut,params$annee_fin, sep="_")
+
+```
+
+```{r connexion_bd_mariadb}
+
+# Base de destination des données à intégrer
+
+con_eau_data_standardise <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
+dbname = "eau_data_standardise")
+
+dbListTables(con_eau_data_standardise) # Lister les tables de la base
+```
+
+```{r import fichier sql, eval=FALSE, include=FALSE}
+# Executer le fichier SQL pour l'import des données -->  Ne marche pas
+df <- dbGetQuery(con_postgres_data_dreal, statement = read_file(paste(params$chemin_source, params$fichier_import,sep="\\")))
+```
+
+```{r connexion_bd_import}
+
+conf <- config::get("postgres_dev")
+
+con_postgres_data_dreal <- dbConnect(RPostgres::Postgres(),
+                             host = conf$server,
+                             port = conf$port,
+                             user = conf$uid,
+                             password = conf$pwd,
+                             dbname = "data_dreal")
+
+dbListTables(con_postgres_data_dreal)
+```
+
+```{r data_import}
+data_import <- tbl(con_postgres_data_dreal,dbplyr::in_schema("lyxea", paste0("oeb",suffixe)))%>%
+  filter(!is.na(ResultatPrelevement)) %>% # 1012553 lignes pour les données 2020
+  # Regroupement des lignes pour supprimer les doublons
+  # distinct([colonnes multiples],keep_all = TRUE) ne fonctionne pas en direct sur la BDD, donc le jeu de données est chargé via collect()
+  collect() %>% 
+  distinct(DatePrelevement,
+           CdPrelevement,
+           ResultatPrelevement,
+           RqAnalysePrelevement,
+           CdParametrePrelevement,
+           CdRddPrelevement,
+           CdSiteSurvPrelevement,
+           CdSupportPrelevement,
+           cdfraction,
+           cdunitereference, .keep_all = TRUE) %>%
+  # Remplacement des lignes LqAnalyse vides
+  mutate(
+    LqAnalysePrelevement = case_when(
+    is.na(LqAnalysePrelevement) & RqAnalysePrelevement == 1 ~ 0.0, # Si RqAnalyse 1 --> = 0.0
+    is.na(LqAnalysePrelevement) & RqAnalysePrelevement != 1 ~ ResultatPrelevement, # Sinon --> = Resultat
+    TRUE ~ LqAnalysePrelevement # Pas de changement
+    ),
+    #  Remplacement des codes prélèvements vides
+    CdPrelevement = ifelse(is.na(CdPrelevement),paste0(format.Date(DatePrelevement,"%Y%mm%dd"),CdSiteSurvPrelevement),CdPrelevement),
+    #  Remplacement des codes réseaux vides
+    CdRddPrelevement = ifelse(is.na(CdRddPrelevement),"0000000000",CdRddPrelevement) 
+    )
+
+# Données transmises par la DREAL (06/2021): 1014528 lignes, format SQL.
+
+# Synthèse des données importées
+data_import%>%
+  summarise(n_lignes=n(), n_prelevements=n_distinct(CdPrelevement), n_parametres=n_distinct(CdParametrePrelevement), n_reseaux=n_distinct(CdRddPrelevement), n_sites=n_distinct(CdSiteSurvPrelevement), date_min=min(DatePrelevement), date_max=max(DatePrelevement))
+#Données 2020 : 1012553 lignes	9146 prélèvements	789 paramètres	86 réseaux 833 sites du 2/01/2020 au 30/12/2020
+```
+
+```{r données manquantes, eval=FALSE, include=FALSE}
+# Package mice pour représenter les données manquantes dans le jeu de données
+data_import%>%
+  mice::md.pattern()
+```
+
+```{r data}
+# Complète le jeu de données au format voulu
+data <- data_import %>%
+  mutate(
+    Source = "LYXEA",
+    Annee = format.Date(DatePrelevement,"%Y"),
+    LbMilieu = NA,
+    LbFraction = NA,
+    Lbsymbole_unite = NA,
+    date_import_oeb = as.Date(now())) %>%
+  select(Source,
+         Date = DatePrelevement,
+         Annee,
+         CdPrelevement,
+         Resultat = ResultatPrelevement,
+         RqAnalyse = RqAnalysePrelevement,
+         LqAnalyse = LqAnalysePrelevement,
+         CdParametre = CdParametrePrelevement,
+         LbParametre = NomParametre,
+         CdRdd = CdRddPrelevement,
+         LbRdd = NomReseau,
+         CdSiteSurv = CdSiteSurvPrelevement,
+         LbSiteSurv = lbstation,
+         CdSupport = CdSupportPrelevement,
+         lbsupport,
+         CdMilieu,
+         LbMilieu,
+         cdfraction,
+         LbFraction,
+         cdunite = cdunitereference,
+         Lbsymbole_unite,
+         date_import_oeb
+         )
+```
+
+```{r insert par annee}
+for(annee in params$annee_debut:params$annee_fin) {
+  
+  print(paste0("INSERT table ",annee))
+  data_annee <- data %>% filter(Annee == annee)
+  
+  dbWriteTable(con_eau_data_standardise, paste0("lyxea_data_",annee), value = data_annee, overwrite=TRUE, append=FALSE)
+}
+
+# 1012553 données insérées pour la table lyxea_data_2020
+```
+
+
+```{r data_traitee}
+# Comparaison avec la donnée en base
+
+# Import de la donnée en base
+data_traitee <- tbl(con_eau_data_standardise, paste0("lyxea_data_",suffixe) %>% collect()
+
+# synthèse
+data_traitee %>%
+  summarise(n_lignes=n(), n_prelevements=n_distinct(CdPrelevement), n_parametres=n_distinct(CdParametre), n_reseaux=n_distinct(CdRdd), n_sites=n_distinct(CdSiteSurv), date_min=min(Date), date_max=max(Date))
+
+summary(data)
+
+summary(data_traitee)
+
+# Comparaison des jeux de données
+data_traitee %>%
+  all_equal(data)
+```
+
+
+

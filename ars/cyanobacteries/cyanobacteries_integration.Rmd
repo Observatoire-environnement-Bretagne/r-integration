@@ -350,19 +350,5 @@ SELECT 'Denombrements', count(*), max(DatePrel), count(distinct CdPrel) FROM oeb
 
 ```
 
-```{sql connection=con_postgresql_dev}
-
-SELECT 'Fermetures', count(*), max(DatePrel), count(distinct CdPrel) FROM ars.t_interdiction_int
-UNION
-SELECT 'Toxines', count(*), max(DatePrel), count(distinct CdPrel) FROM ars_cyano.ars_toxines
-UNION
-SELECT 'Denombrements', count(*), max(DatePrel), count(distinct CdPrel) FROM oeb_ars_cyano.ars_denombrement ;
-
-```
-
-# Export du fichier pour la carto
-```{r}
-
-```
 
 
