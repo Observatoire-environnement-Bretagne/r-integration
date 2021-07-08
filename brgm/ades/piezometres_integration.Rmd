@@ -3,8 +3,8 @@ title: "Integration des données piezometriques"
 output: html_notebook
 params:
   reseau_piezo: '0400000020'
-  date_debut: 2021-05-01
-  date_fin: 2021-05-31
+  date_debut: 2021-06-01
+  date_fin: 2021-07-01
   pagination: 5000
 ---
 
@@ -75,6 +75,7 @@ db.insertion <- function(con,table,data) {
   
   # Date de la dernière donnée en base
   Date_max <- tbl(con, table) %>% summarise(Date_max = max(Date_de_la_mesure, na.rm = TRUE)) %>% pull(Date_max)
+  if(is.na(Date_max)) Date_max <- as.Date(params$date_debut)-1
   
   # Données plus récentes à insérer
   data <- data %>% filter(Date_de_la_mesure > Date_max)
@@ -83,7 +84,8 @@ db.insertion <- function(con,table,data) {
 if (isTRUE(data %>% tally() > 0)) {
   
   # Insertion des nouvelles lignes
-  dbWriteTable(con, table, data, overwrite=TRUE, append=FALSE)
+  dbWriteTable(con, table, data, overwrite=FALSE, append=TRUE,
+             fileEncoding="latin1")
   
   # Horodate en commentaire
 mise_a_jour <- paste0(format.Date(Sys.Date(),"%d/%m/%Y"), " : Actualisation ",params$actualisation)
@@ -109,11 +111,13 @@ conf <- config::get("mysql_local")
 
 con_mysql_local <- dbConnect(odbc::odbc(),
                              Driver=conf$driver,
-                             host = conf$server,
+                             host = conf$host,
                              UID = conf$uid,
                              PWD = conf$pwd,
+                             port = conf$port,
                              timeout = 10,
-                             database = "oeb_piezo_variation_nappes")
+                             database = "oeb_piezo_variation_nappes",
+                             encoding = "latin1")
 
 dbListTables(con_mysql_local) # Lister les tables de la base
 ```
@@ -152,7 +156,7 @@ query_chroniques = list(
                  format = 'json',
                  size = params$pagination,
                  date_debut_mesure = params$date_debut,
-                 date_fin_mesure = params$date_fin)
+                 date_fin_mesure = as.Date(params$date_fin)-1)
 
 # Requête des chroniques
 hubeau_chroniques <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques?", query=query_chroniques)
@@ -166,6 +170,7 @@ Réponse de Hub'eau :
 ```{r}
 all_equal(db_piezometres, hubeau_stations)
 
+# Piezometres sans ID ?
 db_piezometres %>% collect() %>%
   left_join(hubeau_stations, by=c("Code_national_BSS" = "code_bss"))%>%
   filter(is.na(bss_id))%>%
@@ -215,6 +220,8 @@ Dateintegration)
 
 ```{r}
 db.insertion(con = con_mysql_local, table = "oeb_tbi_variationnappe", data = oeb_tbi_variationnappe_tmp)
+
+# 2021-07-08 : 1453 lignes insérées pour juin 2021
 ```
 
 
