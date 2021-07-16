@@ -3,7 +3,7 @@ title: "Intégration des données Indice invertébrés multimétrique (I2M2)"
 output: html_notebook
 params:  
   chemin_source: 'O:\01.BD_EAU\DREAL\I2M2'
-  actualisation: ''
+  actualisation: '2020'
 ---
 
 
@@ -22,6 +22,55 @@ library(jsonlite)
 library(mice) # Gestion des données manquantes
 library(plotly) # Graphiques interactifs
 library(leaflet) # Cartes interactives
+
+#------------------------
+#  FONCTIONS
+#------------------------
+
+db.insertion <- function(con,table,data) {
+  
+  mise_a_jour <- paste0(format.Date(Sys.Date(),"%d/%m/%Y"), " : Actualisation ",params$actualisation)
+  
+  if(dbExistsTable(con_oeb_calcul_i2m2,"oeb_i2m2")){
+  
+  # Date de la dernière donnée en base
+  Date_max <- tbl(con, table) %>% summarise(Date_max = max(Date, na.rm = TRUE)) %>% pull(Date_max)
+  if(is.na(Date_max)) Date_max <- as.Date(params$date_debut)-1
+  
+  # Données plus récentes à insérer
+  data <- data %>% filter(Date > Date_max && year(Date) < as.integer(params$actualisation)+1)
+  
+  # Existe-t-il des données à insérer ?
+if (isTRUE(data %>% tally() > 0)) {
+  
+  # Insertion des nouvelles lignes
+  dbWriteTable(con, table, data, overwrite=FALSE, append=TRUE,
+             fileEncoding="latin1")
+  
+  # Horodate en commentaire
+dbGetQuery(con_mysql_local, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
+
+paste0("Données insérées : ",data%>%tally)
+
+}
+  else {
+    
+    paste0("Aucune donnée à insérer depuis le ", format.Date(Date_max,"%d/%m/%Y"))
+  
+    } # fin if(données à insérer)
+  
+  } # fin if (table existe)
+  
+  else { # La table n'existe pas
+    
+    # Création de la table
+  dbWriteTable(con, table, data, overwrite=TRUE, append=FALSE,
+             fileEncoding="latin1")
+    
+    dbGetQuery(con, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
+  } # fin if(table n'existe pas)
+  
+} # fin db.insertion
 ```
 
 ```{r connexion bd}
@@ -130,11 +179,11 @@ bassin versant.
 
 # Fichiers de sortie SEE / outil d'évaluation
 import_i2m2 <- list.files(paste0(params$chemin_source,"\\Traitement\\sortie_seee_i2m2"), pattern=paste0("Sortie_SEEE_I2M2_", params$actualisation)) %>% 
-    map_df(~read.csv(paste0(params$chemin_source,"\\Traitement\\sortie_seee_i2m2\\",.), skip = 1, sep=';', colClasses=c(`CODE_STATION`="character")))
+    map_df(~read.csv(paste0(params$chemin_source,"\\Traitement\\sortie_seee_i2m2\\",.), skip = 1, sep=';', colClasses=c("CODE_OPERATION"="character")))
 
 # Fichiers de sortie SEE / outil de diagnostic
 import_i2m2_outildiag <- list.files(paste0(params$chemin_source,"\\Traitement\\sortie_seee_outildiag"), pattern=paste0("Sortie_SEEE_ODInvertebres_", params$actualisation)) %>% 
-    map_df(~read.csv(paste0(params$chemin_source,"\\Traitement\\sortie_seee_outildiag\\",.), skip = 1, sep=';', colClasses=c(`CODE_STATION`="character")))
+    map_df(~read.csv(paste0(params$chemin_source,"\\Traitement\\sortie_seee_outildiag\\",.), skip = 1, sep=';', colClasses=c("CODE_OPERATION"="character")))
 
 ```
 
@@ -154,41 +203,42 @@ referentiel_series <- read.csv(paste0(params$chemin_source,"\\ref_series.csv"), 
 
 ```{r table oeb_i2m2}
 oeb_i2m2 <- import_i2m2 %>%
-  mutate(CdSite = as.character(`CODE_STATION`), 
-         Date = as.Date(DATE, "%d/%m/%Y")) %>%
+  mutate(CdSite = sprintf("%08d", CODE_STATION),
+         Serie = paste(CODE_PAR," - ",LIB_PAR),
+         Resultat = as.character(RESULTAT)) %>%
   left_join(referentiel_sites, by="CdSite", copy=TRUE)%>%
   select(
-  Code_entite_geographique = CODE_STATION,
+  Code_entite_geographique = CdSite,
   Lible_entite_geographique = LbSite,
   CoordX_WGS84 = Coord_X_wgs84,
   CoordY_WGS84 = Coord_Y_wgs84,
-  Date,
-  Serie = LIB_PAR,
-  Resultat = RESULTAT)
+  Date = DATE,
+  Serie,
+  Resultat)
 
 oeb_i2m2 %>%
   summarise("Lignes" = n(),
             "Sites" = n_distinct(Code_entite_geographique),
             "Site inconnus" = n_distinct(Code_entite_geographique)-n_distinct(Lible_entite_geographique),
-            "Dates inconnues" = sum(is.na(Date)),
+            "Dates non renseignées" = sum(is.na(Date)),
             "Date min" = min(Date, na.rm=TRUE),
             "Date max" = max(Date, na.rm=TRUE),
             "Series" = n_distinct(Serie),
-            "Serie inconnue" = sum(is.na(Serie)))
+            "Serie non renseignée" = sum(is.na(Serie)))
 ```
 ## Intégrité des données
 
-```{r données manquantes}
+```{r données manquantes i2m2}
 # Package mice pour représenter les données manquantes dans le jeu de données
-  mice::md.pattern(oeb_i2m2)
+  mice::md.pattern(oeb_i2m2, rotate.names=T)
 
-# 105 lignes sans site connu
-# 7 lignes sans prélèvement connu
+# 2020 : 77 lignes sans site connu
+# 2019 : 7 dates non renseignées
 ```
 ### Codes des sites inconnus
 ```{r}
-oeb_i2m2 %>%
-  anti_join(referentiel_sites, by=c("Code_entite_geographique" = "CdSite"), copy=TRUE)%>%
+sites_inconnus <- oeb_i2m2  %>%
+  anti_join(referentiel_sites, by=c("Code_entite_geographique" = "CdSite"), copy=TRUE) %>%
   distinct(Code_entite_geographique)
 ```
 ## Visualisation des données
@@ -209,7 +259,7 @@ leaflet() %>%
   addTiles() %>%
   addCircleMarkers(~CoordX_WGS84, 
                    ~CoordY_WGS84,
-                   color="red",
+                   color=~as.factor(Resultat>0.5),
                    radius = 1,
                    opacity = 1,
                    label=~Lible_entite_geographique,
@@ -227,17 +277,17 @@ oeb_i2m2_outildiag <- import_i2m2_outildiag  %>%
    values_to = "Resultat",
    values_drop_na = TRUE
  ) %>%
-  mutate(CdSite = as.character(`CODE_STATION`), 
-         Date = as.Date(DATE, "%d/%m/%Y")) %>%
-  left_join(referentiel_sites, by="CdSite", copy=TRUE)%>%
-  select(Code_entite_geographique = CODE_STATION,
+  mutate(CdSite = sprintf("%08d", CODE_STATION), 
+         Resultat = as.character(Resultat)) %>%
+  left_join(referentiel_sites, by="CdSite", copy=TRUE) %>%
+  left_join(referentiel_series, by="Code_serie") %>%
+  select(Code_entite_geographique = CdSite,
   Lible_entite_geographique = LbSite,
   CoordX_WGS84 = Coord_X_wgs84,
   CoordY_WGS84 = Coord_Y_wgs84,
-  Date,
-  Code_serie,
-  Resultat)%>%
-  left_join(referentiel_series, by="Code_serie")
+  Date = DATE,
+  Serie,
+  Resultat)
 
 oeb_i2m2_outildiag %>%
   summarise("Lignes" = n(),
@@ -252,19 +302,25 @@ oeb_i2m2_outildiag %>%
 
 ## Intégrité des données
 
-```{r données manquantes}
+```{r données manquantes outildiag}
 # Package mice pour représenter les données manquantes dans le jeu de données
-mice::md.pattern(oeb_i2m2_outildiag)
+mice::md.pattern(oeb_i2m2_outildiag, rotate.names=T)
 
-# 105 lignes sans site connu
-# 7 lignes sans prélèvement connu
+# 2020 : aucune donnée manquante
 ```
 ### Codes des sites inconnus
 
 ```{r}
-oeb_i2m2 %>%
+sites_inconnus <- oeb_i2m2 %>%
   anti_join(referentiel_sites, by=c("Code_entite_geographique" = "CdSite"), copy=TRUE)%>%
+  select(Code_entite_geographique)%>%
+  union(sites_inconnus) %>%
   distinct(Code_entite_geographique)
+
+sites_inconnus%>%
+  mutate(station = paste0(Code_entite_geographique," - INCONNU"))%>%
+  select(station) %>%
+write.table(paste0(params$chemin_source,"\\traitement\\",format.Date(today(),"%Y-%m-%d"),"_sites_inconnus_",params$actualisation,".tsv"), quote=FALSE, sep='\t', row.names = FALSE)
 ```
 
 ## Visualisation des données
@@ -286,7 +342,20 @@ oeb_i2m2_outildiag %>%
   coord_flip()+
   ggtitle("Scores des indices invertébrés I2M2")
 ```
+```{r ecriture_bdd}
 
+db.insertion(con_oeb_calcul_i2m2,"oeb_i2m2_test",oeb_i2m2)
+
+  dbWriteTable(con_oeb_calcul_i2m2, "oeb_i2m2_test", oeb_i2m2, overwrite=TRUE, append=FALSE,
+             fileEncoding="Latin1")
+
+```
+
+
+```{r tables_bdd}
+tbl(con_oeb_calcul_i2m2,"oeb_i2m2")%>%collect()%>%
+  mutate(Date = as.Date(Date,'%d/%m/%Y'))%>%summary()
+```
 
 
 

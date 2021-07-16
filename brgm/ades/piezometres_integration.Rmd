@@ -90,7 +90,7 @@ if (isTRUE(data %>% tally() > 0)) {
   # Horodate en commentaire
 mise_a_jour <- paste0(format.Date(Sys.Date(),"%d/%m/%Y"), " : Actualisation ",params$actualisation)
 
-dbGetQuery(con_mysql_local, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
+dbGetQuery(con, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
 
 paste0("Données insérées : ",data%>%tally)
 
@@ -219,7 +219,7 @@ Dateintegration)
 ```
 
 ```{r}
-db.insertion(con = con_mysql_local, table = "oeb_tbi_variationnappe", data = oeb_tbi_variationnappe_tmp)
+db.insertion(con = con_mysql_local, table = "oeb_tbi_variationnappe_tmp", data = oeb_tbi_variationnappe_tmp)
 
 # 2021-07-08 : 1453 lignes insérées pour juin 2021
 ```

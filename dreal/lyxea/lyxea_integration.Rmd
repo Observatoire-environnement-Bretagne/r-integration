@@ -55,7 +55,7 @@ dbListTables(con_postgres_data_dreal)
 ```
 
 ```{r data_import}
-data_import <- tbl(con_postgres_data_dreal,dbplyr::in_schema("lyxea", paste0("oeb",suffixe)))%>%
+data_import <- tbl(con_postgres_data_dreal,dbplyr::in_schema("lyxea", paste0("oeb_donnees",suffixe)))%>%
   filter(!is.na(ResultatPrelevement)) %>% # 1012553 lignes pour les données 2020
   # Regroupement des lignes pour supprimer les doublons
   # distinct([colonnes multiples],keep_all = TRUE) ne fonctionne pas en direct sur la BDD, donc le jeu de données est chargé via collect()
@@ -87,7 +87,14 @@ data_import <- tbl(con_postgres_data_dreal,dbplyr::in_schema("lyxea", paste0("oe
 
 # Synthèse des données importées
 data_import%>%
-  summarise(n_lignes=n(), n_prelevements=n_distinct(CdPrelevement), n_parametres=n_distinct(CdParametrePrelevement), n_reseaux=n_distinct(CdRddPrelevement), n_sites=n_distinct(CdSiteSurvPrelevement), date_min=min(DatePrelevement), date_max=max(DatePrelevement))
+  summarise(n_lignes=n(), 
+            n_prelevements=n_distinct(CdPrelevement), 
+            n_parametres=n_distinct(CdParametrePrelevement), 
+            n_reseaux=n_distinct(CdRddPrelevement), 
+            n_sites=n_distinct(CdSiteSurvPrelevement), 
+            date_min=min(DatePrelevement), 
+            date_max=max(DatePrelevement))
+
 #Données 2020 : 1012553 lignes	9146 prélèvements	789 paramètres	86 réseaux 833 sites du 2/01/2020 au 30/12/2020
 ```
 
@@ -133,15 +140,20 @@ data <- data_import %>%
 ```
 
 ```{r insert par annee}
+start_time <- Sys.time()
+
 for(annee in params$annee_debut:params$annee_fin) {
   
   print(paste0("INSERT table ",annee))
   data_annee <- data %>% filter(Annee == annee)
   
-  dbWriteTable(con_eau_data_standardise, paste0("lyxea_data_",annee), value = data_annee, overwrite=TRUE, append=FALSE)
+  dbWriteTable(con_postgres_data_dreal, paste0("lyxea_data_",annee), value = data_annee, overwrite=TRUE, append=FALSE)
 }
 
-# 1012553 données insérées pour la table lyxea_data_2020
+end_time <- Sys.time()
+end_time - start_time
+
+# 1012553 données insérées pour la table lyxea_data_2020 (sur le serveur MariaDB)
 ```
 
 
@@ -149,7 +161,7 @@ for(annee in params$annee_debut:params$annee_fin) {
 # Comparaison avec la donnée en base
 
 # Import de la donnée en base
-data_traitee <- tbl(con_eau_data_standardise, paste0("lyxea_data_",suffixe) %>% collect()
+data_traitee <- tbl(con_eau_data_standardise, paste0("lyxea_data",suffixe)) %>% collect()
 
 # synthèse
 data_traitee %>%

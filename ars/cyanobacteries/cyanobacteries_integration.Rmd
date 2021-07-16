@@ -3,7 +3,7 @@ title: "Integration données ARS / cyanobactéries"
 output: html_notebook
 params:
   chemin_source: O:/01.BD_EAU/ARS/CYANOBACTERIES/SOURCE/Envois_ARS
-  actualisation: '2018'
+  actualisation: '2020'
   seuil_denombrement: 100000
   contexte: developpement
 ---
@@ -37,7 +37,7 @@ db.insertion <- function(con,table,data) {
   #data<-jours_interdiction
   
   # Date de la dernière donnée en base
-  DatePrel_max <- tbl(con, table) %>% summarise(DatePrel_max = max(DatePrel)) %>% pull(DatePrel_max)
+  DatePrel_max <- tbl(con, table) %>% filter(DatePrel <= fin_periode) %>% summarise(DatePrel_max = max(DatePrel)) %>% pull(DatePrel_max)
   
   # Données plus récentes à insérer
   data <- data %>% filter(DatePrel > DatePrel_max)
@@ -153,8 +153,8 @@ data_toxines <- read_xlsx(paste0(params$chemin_source,'/',fichier),
           skip = 3)%>%  # Le tableau commence à la 4ème ligne
   rename_with(~str_remove(., ' TOTALE'))%>% # Retirer le suffixe ' TOTALE' qui est présent sur (certains) noms de colonne
   mutate(CdSiteSurv = as.character(`SIT - Code national`),
-         DatePrel = `PLV Date`,
-         CdPrel = as.character(`PLV Code`),
+         DatePrel = as.Date(`PLV Date`),
+         CdPrel = ifelse(!is.na(`PLV Code`), as.character(`PLV Code`), paste0(as.character(`SIT - Code national`),format.Date(as.Date(`PLV Date`),"%y%m%d"))),
          `Présence de toxine` = (`SOMME DES MICROCYSTINES ANALYSÉES` > 0 
                                  | `ANATOXINE A` > 0
                                  | `CYLINDROSPERMOPSINE` > 0
@@ -181,7 +181,7 @@ series_toxines <- data_toxines %>%
 
 data_toxines %>%
   left_join(db_site, by = "CdSiteSurv", copy = TRUE)%>%
-# filter(CdSiteSurv == 35000870)%>%
+ #filter(CdSiteSurv == 22001425)%>%
   summarise("Nombre de sites" = n_distinct(CdSiteSurv),
             "Sites connus" = n_distinct(LbSiteSurv),
             "Nombre de prélèvements" = n_distinct(CdPrel),
@@ -203,7 +203,7 @@ series_denombrements <- read_xlsx(paste0(params$chemin_source,'/',fichier),
   rename_at(vars(contains("traduite")), ~"RESULT - Valeur traduite")%>% # Renommage des noms de colonnes instables
   mutate(CdSiteSurv = as.character(`SIT - Code national`),
          DatePrel = `PLV - Date`,
-         CdPrel = as.character(`PLV - Code`),
+         CdPrel = ifelse(!is.na(`PLV - Code`), as.character(`PLV - Code`), paste0(as.character(`SIT - Code national`),format.Date(as.Date(`PLV - Date`),"%y%m%d"))),
          Serie = "Nombre de cellules de cyanobactéries",
          resultat = as.integer(str_replace_all(`RESULT - Valeur traduite`, "\\s+", "")), # Suppression des espaces séparateurs de milliers
          unite = `ANA - Param. - Unité`) %>%
@@ -301,7 +301,7 @@ jours_interdiction <- data_interdictions %>%
 
 if(params$contexte == "production") {
   
-  db.insertion(con_mysql_local,"ars_toxines",series_toxines)
+  db.insertion(con=con_mysql_local,table="ars_toxines",data=series_toxines)
   
   db.insertion(con_mysql_local,"ars_denombrement",series_denombrements)
   
