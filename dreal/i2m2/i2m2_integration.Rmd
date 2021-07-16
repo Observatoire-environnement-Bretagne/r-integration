@@ -1,0 +1,292 @@
+---
+title: "Intégration des données Indice invertébrés multimétrique (I2M2)"
+output: html_notebook
+params:  
+  chemin_source: 'O:\01.BD_EAU\DREAL\I2M2'
+  actualisation: ''
+---
+
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+library(config) # Utilisation d'un fichier de configuration, cf  https://db.rstudio.com/best-practices/managing-credentials/#stored-in-a-file-with-config
+library(tidyverse)
+library(DBI) # pour les connexions aux BDD
+library(RPostgres) # driver postgres
+library(RMariaDB) # driver
+library(RMySQL)
+library(lubridate) # calcul sur les dates
+library(mice) # Gestion des données manquantes
+library(httr) #
+library(jsonlite)
+library(mice) # Gestion des données manquantes
+library(plotly) # Graphiques interactifs
+library(leaflet) # Cartes interactives
+```
+
+```{r connexion bd}
+
+conf <- config::get("mysql_local")
+
+con_oeb_calcul_i2m2 <- dbConnect(odbc::odbc(),
+                             Driver=conf$driver,
+                             host = conf$server,
+                             UID = conf$uid,
+                             PWD = conf$pwd,
+                             database = "oeb_calcul_i2m2")
+
+conf <- config::get("mysql_oeb")
+
+con_referentiels <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
+dbname = "eau_referentiels")
+
+conf <- config::get("postgres_dev")
+
+con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
+                          Driver       = conf$driver,
+                          servername   = conf$server,
+                          UID = conf$uid,
+                          PWD = conf$pwd,
+                          Port = conf$port,
+                          database = conf$database)
+```
+
+# Outil d'évaluation I2M
+
+## Source
+
+> Mondy CP, Villeneuve B, Archaimbault V, Usseglio-Polatera P. (2012) A new macroinvertebrate-based multimetric index (I2M2) to evaluate ecological quality of French wadeable streams fulfilling the WFD demands: A taxonomical and trait approach. Ecological indicators, 18: 452-67
+
+> Usseglio-Polatera, P. & Mondy, C. (2011) Développement et optimisation de l'indice biologique macroinvertébrés benthiques (I2M2) pour les cours d'eau. Partenariat Onema / UPV-Metz - LIEBE - UMR-CNRS 7146, 27p.
+
+## Champs en entrée
+
+- CODE_OPERATION Code de l’opération de contrôle désignée. Le champ est obligatoire et de type alphanumérique.
+- CODE_STATION Code de la station associée à l’opération. Le champ est facultatif.
+- DATE Date à laquelle l’opération a été effectuée. Le champ est facultatif.
+- TYPO_NATIONALE Selon la nomenclature sandre 408. Mnémonique de l’élément de la typologie nationale auquel est rattachée la station. Le champ est obligatoire.
+- CODE_PHASE Selon la nomenclature 480. Le champ est obligatoire. Seuls les codes de l’élément de la nomenclature sont acceptés.
+- CODE_TAXON Code sandre du taxon identifié. Le champ est obligatoire et de type entier numérique positif.
+- RESULTAT Effectif ou présence du taxon identifié. Le champ est obligatoire et de type entier numérique positif.
+- CODE_REMARQUE Selon la nomenclature sandre 155. Le champ est obligatoire. Seules les modalités 1 ou 4 sont acceptées
+
+## Champs en sortie 
+
+- CODE_OPERATION Code de l’opération de contrôle renseigné. Ce champ est repris du fichier d’entrée.
+- CODE_STATION Code de la station associée à l’opération. Ce champ est repris du fichier d’entrée.
+- DATE Date à laquelle l’opération a été effectuée. Ce champ est repris du fichier d’entrée.
+- CODE_PAR Code sandre du paramètre de sortie.
+- LIB_PAR Libellé du paramètre de sortie.
+- RESULTAT Valeur du paramètre de sortie en EQR.
+- COMMENTAIRES Information sur les taxons non contributifs (liste taxonomique et proportion du prélèvement).
+
+# Outil de diagnostic ODInvertebre
+
+Notice : [ODInvertebres_v1.0.2_Format_echange.pdf](https://seee.eaufrance.fr/algos/ODInvertebres/Documentation/ODInvertebres_v1.0.2_Format_echange.pdf)
+
+## Champs du fichier d'entrée
+
+- CODE_OPERATION Code de l’opération de contrôle désignée. Le champ est obligatoire et de type alphanumérique.
+- CODE_STATION Code de la station associée à l’opération. Le champ est facultatif.
+- DATE Date à laquelle l’opération a été effectuée. Le champ est facultatif.
+- TYPO_NATIONALE Selon la nomenclature sandre 408. Code de typologie nationale auquel est rattachée la station. Le
+champ est facultatif
+- CODE_PHASE Selon la nomenclature 480. Le champ est facultatif.
+- CODE_TAXON Code sandre du taxon identifié. Le champ est obligatoire et de type entier numérique positif.
+- RESULTAT Effectif ou présence du taxon identifié. Le champ est obligatoire et de type entier numérique positif.
+- CODE_REMARQUE Selon la nomenclature sandre 155. Le champ est obligatoire et seules les modalités 1 ou 4 sont acceptées.
+
+## Champs du fichier de sortie
+
+- CODE_STATION Code de la station associée à l’opération. Ce champ est repris du fichier d’entrée.
+- DATE Date à laquelle l’opération a été effectuée. Ce champs est repris du fichier d’entrée.
+- CODE_OPERATION Code de l’opération de contrôle renseigné. Ce champ est repris du fichier d’entrée.
+- MATIERES_ORGANIQUES Probabilité d’impact par les matières organiques et oxydables. Cette pression est estimée en utilisant les paramètres individuels décrits dans les grilles du SEQ-eau v2: oxygène dissous, taux de saturation en oxygène, demande biochimique en oxygène (DBO5), demande chimique en oxygène (DCO), carbone organique dissous, ammonium et azote Kjeldahl.
+- MATIERES_PHOSPHOREES Probabilité d’impact par les matières phosphorées. Cette pression est estimée en utilisant les paramètres individuels décrits dans les grilles du SEQ-eau v2: orthophosphates et phosphore total.
+- MATIERES_AZOTEES Probabilité d’impact par les matières azotées (hors nitrates). Cette pression est estimée en utilisant les paramètres individuels décrits dans les grilles du SEQ-eau v2: ammonium, azote Kjeldahl et nitrites.
+- NITRATES Probabilité d’impact par les nitrates
+- HAP   Probabilité d’impact par les hydrocarbures aromatiques polycycliques. Cette pression est estimée en
+utilisant les 16 HAP individuels décrits dans les grilles du SEQ-eau v2
+- PESTICIDES    Probabilité d’impact par les pesticides. Cette pression est estimée en utilisant les 74 pesticides individuels décrits dans les grilles du SEQ-eau v2.
+- RIPISYLVE   Probabilité d’impact liée à la dégradation de la ripisylve. Cette pression est estimée par le taux de couverture forestière dans la zone de 30m de part et d’autre du lit mineur.
+- VOIES_COMMUNICATION   Probabilité d’impact liée à la présence de voies de communication dans le lit mineur.
+- URBANISATION_100M Probabilité d’impact liée à l’urbanisation dans une zone de 100m de part et d’autre du cours d’eau.
+- RISQUE_COLMATAGE    Probabilité d’impact liée au colmatage des substrat. Cette pression est estimée par le risque potentiel
+d’érosion des sols.
+- INSTABILITE_HYDROLOGIQUE    Probabilité d’impact liée à l’instabilité hydrologique. Cette pression est estimée en intégrant les rapports surface agricole irriguée/surface totale du bassin versant et volume d’eau retenu/volume d’eau qui s’écoule.
+ANTHROPISATION_BV Probabilité d’impact liée à l’anthropisation globale du bassin versant. Cette pression est estimée en intégrant les pourcentages d’urbanisation, d’agriculture intensive et de surfaces naturelles à l’échelle du
+bassin versant.
+
+# Import des fichiers de sortie SEEE
+
+- Utiliser le [site du Système d’évaluation de l’état des eaux (SEEE)](https://seee.eaufrance.fr/) pour traiter les fichiers d'entrée
+- Sauvegarder les fichiers de sortie dans les dossiers
+    - `r paste0(params$chemin_source,"\\Traitement\\sortie_seee_i2m2")` (pour l'outil d'évaluation) 
+    - et `r paste0(params$chemin_source,"\\Traitement\\sortie_seee_outildiag")` (pour l'outil de diagnostic)
+
+```{r data_import}
+
+# Lecture et union des fichiers de sortie SEEE
+
+# Fichiers de sortie SEE / outil d'évaluation
+import_i2m2 <- list.files(paste0(params$chemin_source,"\\Traitement\\sortie_seee_i2m2"), pattern=paste0("Sortie_SEEE_I2M2_", params$actualisation)) %>% 
+    map_df(~read.csv(paste0(params$chemin_source,"\\Traitement\\sortie_seee_i2m2\\",.), skip = 1, sep=';', colClasses=c(`CODE_STATION`="character")))
+
+# Fichiers de sortie SEE / outil de diagnostic
+import_i2m2_outildiag <- list.files(paste0(params$chemin_source,"\\Traitement\\sortie_seee_outildiag"), pattern=paste0("Sortie_SEEE_ODInvertebres_", params$actualisation)) %>% 
+    map_df(~read.csv(paste0(params$chemin_source,"\\Traitement\\sortie_seee_outildiag\\",.), skip = 1, sep=';', colClasses=c(`CODE_STATION`="character")))
+
+```
+
+# Import des référentiels
+
+- Référentiel des sites depuis la base MariaDB OEB / eau_referentiels.eau_referentiel_site
+- Référentiel des codes de séries dans le dossier source (TODO à intégrer en base)
+
+```{r referentiels}
+referentiel_sites <- tbl(con_referentiels, "eau_referentiel_site")%>%
+  select(LbSite,CdSite,Coord_X_wgs84,Coord_Y_wgs84)
+
+referentiel_series <- read.csv(paste0(params$chemin_source,"\\ref_series.csv"), sep=';', encoding = "UTF-8")
+```
+
+# Table des indices i2m2
+
+```{r table oeb_i2m2}
+oeb_i2m2 <- import_i2m2 %>%
+  mutate(CdSite = as.character(`CODE_STATION`), 
+         Date = as.Date(DATE, "%d/%m/%Y")) %>%
+  left_join(referentiel_sites, by="CdSite", copy=TRUE)%>%
+  select(
+  Code_entite_geographique = CODE_STATION,
+  Lible_entite_geographique = LbSite,
+  CoordX_WGS84 = Coord_X_wgs84,
+  CoordY_WGS84 = Coord_Y_wgs84,
+  Date,
+  Serie = LIB_PAR,
+  Resultat = RESULTAT)
+
+oeb_i2m2 %>%
+  summarise("Lignes" = n(),
+            "Sites" = n_distinct(Code_entite_geographique),
+            "Site inconnus" = n_distinct(Code_entite_geographique)-n_distinct(Lible_entite_geographique),
+            "Dates inconnues" = sum(is.na(Date)),
+            "Date min" = min(Date, na.rm=TRUE),
+            "Date max" = max(Date, na.rm=TRUE),
+            "Series" = n_distinct(Serie),
+            "Serie inconnue" = sum(is.na(Serie)))
+```
+## Intégrité des données
+
+```{r données manquantes}
+# Package mice pour représenter les données manquantes dans le jeu de données
+  mice::md.pattern(oeb_i2m2)
+
+# 105 lignes sans site connu
+# 7 lignes sans prélèvement connu
+```
+### Codes des sites inconnus
+```{r}
+oeb_i2m2 %>%
+  anti_join(referentiel_sites, by=c("Code_entite_geographique" = "CdSite"), copy=TRUE)%>%
+  distinct(Code_entite_geographique)
+```
+## Visualisation des données
+
+### Histogramme des indices I2M2
+```{r series_histogramme}
+oeb_i2m2 %>%
+  ggplot(aes(x=Resultat, color=as.factor(year(Date))))+
+  geom_histogram()+
+  facet_wrap(~Serie, scales = "free")
+```
+### Carte leaflet
+
+```{r carte_i2m2}
+oeb_i2m2 %>%
+  filter(Serie == "Ind Invert Multimetrique")%>%
+leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(~CoordX_WGS84, 
+                   ~CoordY_WGS84,
+                   color="red",
+                   radius = 1,
+                   opacity = 1,
+                   label=~Lible_entite_geographique,
+                   popup=~Code_entite_geographique)
+```
+
+
+# Table de l'outil de diagnostic ODInvertebre
+
+```{r table oeb_i2m2_outildiag}
+oeb_i2m2_outildiag <- import_i2m2_outildiag  %>%
+  pivot_longer(.,
+   cols = 4:ncol(.),
+   names_to = "Code_serie",
+   values_to = "Resultat",
+   values_drop_na = TRUE
+ ) %>%
+  mutate(CdSite = as.character(`CODE_STATION`), 
+         Date = as.Date(DATE, "%d/%m/%Y")) %>%
+  left_join(referentiel_sites, by="CdSite", copy=TRUE)%>%
+  select(Code_entite_geographique = CODE_STATION,
+  Lible_entite_geographique = LbSite,
+  CoordX_WGS84 = Coord_X_wgs84,
+  CoordY_WGS84 = Coord_Y_wgs84,
+  Date,
+  Code_serie,
+  Resultat)%>%
+  left_join(referentiel_series, by="Code_serie")
+
+oeb_i2m2_outildiag %>%
+  summarise("Lignes" = n(),
+            "Sites" = n_distinct(Code_entite_geographique),
+            "Site inconnus" = n_distinct(Code_entite_geographique)-n_distinct(Lible_entite_geographique),
+            "Dates inconnues" = sum(is.na(Date)),
+            "Date min" = min(Date, na.rm=TRUE),
+            "Date max" = max(Date, na.rm=TRUE),
+            "Series" = n_distinct(Serie),
+            "Serie inconnue" = sum(is.na(Serie)))
+```
+
+## Intégrité des données
+
+```{r données manquantes}
+# Package mice pour représenter les données manquantes dans le jeu de données
+mice::md.pattern(oeb_i2m2_outildiag)
+
+# 105 lignes sans site connu
+# 7 lignes sans prélèvement connu
+```
+### Codes des sites inconnus
+
+```{r}
+oeb_i2m2 %>%
+  anti_join(referentiel_sites, by=c("Code_entite_geographique" = "CdSite"), copy=TRUE)%>%
+  distinct(Code_entite_geographique)
+```
+
+## Visualisation des données
+
+### Histogrammes des séries de diagnostic Invertébrés
+
+```{r series_histogram}
+oeb_i2m2_outildiag %>%
+  ggplot(aes(x=Resultat, color=as.factor(year(Date))))+
+  geom_histogram()+
+  facet_wrap(~Serie)
+```
+### Comparaison des indices invertébrés I2M2 par année
+
+```{r series_boxplot}
+oeb_i2m2_outildiag %>%
+  ggplot(aes(x=Serie, y=Resultat, color=as.factor(year(Date))))+
+  geom_boxplot()+
+  coord_flip()+
+  ggtitle("Scores des indices invertébrés I2M2")
+```
+
+
+
+
