@@ -19,7 +19,6 @@ library(lubridate) # calcul sur les dates
 library(mice) # Gestion des données manquantes
 library(httr) #
 library(jsonlite)
-library(mice) # Gestion des données manquantes
 library(plotly) # Graphiques interactifs
 library(leaflet) # Cartes interactives
 
@@ -31,24 +30,24 @@ db.insertion <- function(con,table,data) {
   
   mise_a_jour <- paste0(format.Date(Sys.Date(),"%d/%m/%Y"), " : Actualisation ",params$actualisation)
   
-  if(dbExistsTable(con_oeb_calcul_i2m2,"oeb_i2m2")){
+  if(dbExistsTable(con,table)){
   
   # Date de la dernière donnée en base
   Date_max <- tbl(con, table) %>% summarise(Date_max = max(Date, na.rm = TRUE)) %>% pull(Date_max)
-  if(is.na(Date_max)) Date_max <- as.Date(params$date_debut)-1
+  if(is.na(Date_max)) Date_max <- as.Date(paste0(params$actualisation,"-01-01"),"%Y-%m-%d")-1
   
   # Données plus récentes à insérer
-  data <- data %>% filter(Date > Date_max && year(Date) < as.integer(params$actualisation)+1)
+  data <- data %>% filter(as.Date(Date,'%d/%m/%Y') > Date_max && year(as.Date(Date,'%d/%m/%Y')) < as.integer(params$actualisation)+1)
   
   # Existe-t-il des données à insérer ?
 if (isTRUE(data %>% tally() > 0)) {
   
   # Insertion des nouvelles lignes
   dbWriteTable(con, table, data, overwrite=FALSE, append=TRUE,
-             fileEncoding="latin1")
+                             encoding = "latin1")
   
   # Horodate en commentaire
-dbGetQuery(con_mysql_local, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
+dbGetQuery(con, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
 
 paste0("Données insérées : ",data%>%tally)
 
@@ -65,7 +64,7 @@ paste0("Données insérées : ",data%>%tally)
     
     # Création de la table
   dbWriteTable(con, table, data, overwrite=TRUE, append=FALSE,
-             fileEncoding="latin1")
+                             encoding = "latin1")
     
     dbGetQuery(con, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
   } # fin if(table n'existe pas)
@@ -82,7 +81,8 @@ con_oeb_calcul_i2m2 <- dbConnect(odbc::odbc(),
                              host = conf$server,
                              UID = conf$uid,
                              PWD = conf$pwd,
-                             database = "oeb_calcul_i2m2")
+                             database = "oeb_calcul_i2m2",
+                             encoding = "latin1")
 
 conf <- config::get("mysql_oeb")
 
@@ -97,7 +97,8 @@ con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
                           UID = conf$uid,
                           PWD = conf$pwd,
                           Port = conf$port,
-                          database = conf$database)
+                          database = conf$database,
+                             encoding = "latin1")
 ```
 
 # Outil d'évaluation I2M
@@ -201,24 +202,26 @@ referentiel_series <- read.csv(paste0(params$chemin_source,"\\ref_series.csv"), 
 
 # Table des indices i2m2
 
-```{r table oeb_i2m2}
-oeb_i2m2 <- import_i2m2 %>%
+```{r table data_i2m2}
+data_i2m2 <- import_i2m2 %>%
   mutate(CdSite = sprintf("%08d", CODE_STATION),
-         Serie = paste(CODE_PAR," - ",LIB_PAR),
-         Resultat = as.character(RESULTAT)) %>%
+         Serie = paste(CODE_PAR,LIB_PAR,sep=" - "),
+         Resultat = as.numeric(RESULTAT),
+         Date = as.Date(DATE,'%d/%m/%Y')) %>%
   left_join(referentiel_sites, by="CdSite", copy=TRUE)%>%
   select(
   Code_entite_geographique = CdSite,
   Lible_entite_geographique = LbSite,
   CoordX_WGS84 = Coord_X_wgs84,
   CoordY_WGS84 = Coord_Y_wgs84,
-  Date = DATE,
+  Date,
   Serie,
   Resultat)
 
-oeb_i2m2 %>%
+data_i2m2 %>%
   summarise("Lignes" = n(),
             "Sites" = n_distinct(Code_entite_geographique),
+            "Site connus" = n_distinct(Lible_entite_geographique),
             "Site inconnus" = n_distinct(Code_entite_geographique)-n_distinct(Lible_entite_geographique),
             "Dates non renseignées" = sum(is.na(Date)),
             "Date min" = min(Date, na.rm=TRUE),
@@ -226,18 +229,19 @@ oeb_i2m2 %>%
             "Series" = n_distinct(Serie),
             "Serie non renseignée" = sum(is.na(Serie)))
 ```
+
 ## Intégrité des données
 
 ```{r données manquantes i2m2}
 # Package mice pour représenter les données manquantes dans le jeu de données
-  mice::md.pattern(oeb_i2m2, rotate.names=T)
+  mice::md.pattern(data_i2m2, rotate.names=T)
 
 # 2020 : 77 lignes sans site connu
 # 2019 : 7 dates non renseignées
 ```
 ### Codes des sites inconnus
 ```{r}
-sites_inconnus <- oeb_i2m2  %>%
+sites_inconnus <- data_i2m2  %>%
   anti_join(referentiel_sites, by=c("Code_entite_geographique" = "CdSite"), copy=TRUE) %>%
   distinct(Code_entite_geographique)
 ```
@@ -245,7 +249,7 @@ sites_inconnus <- oeb_i2m2  %>%
 
 ### Histogramme des indices I2M2
 ```{r series_histogramme}
-oeb_i2m2 %>%
+data_i2m2 %>%
   ggplot(aes(x=Resultat, color=as.factor(year(Date))))+
   geom_histogram()+
   facet_wrap(~Serie, scales = "free")
@@ -253,43 +257,61 @@ oeb_i2m2 %>%
 ### Carte leaflet
 
 ```{r carte_i2m2}
-oeb_i2m2 %>%
-  filter(Serie == "Ind Invert Multimetrique")%>%
+data_i2m2 %>%
+  filter(Serie == "7613 - Ind Invert Multimetrique")%>%
 leaflet() %>%
   addTiles() %>%
   addCircleMarkers(~CoordX_WGS84, 
                    ~CoordY_WGS84,
-                   color=~as.factor(Resultat>0.5),
+                   #color=~as.factor(Resultat>0.5),
                    radius = 1,
                    opacity = 1,
                    label=~Lible_entite_geographique,
                    popup=~Code_entite_geographique)
 ```
+```{r table oeb_i2m2}
 
+# Table au format de la BD MYSQL LOCAL
+
+oeb_i2m2 <- data_i2m2 %>%
+  filter(!is.na(Lible_entite_geographique)) %>% # Retirer les sites absents du référentiel
+  mutate(Resultat = as.character(Resultat),
+         Date = format.Date(Date,'%d/%m/%Y')) %>%
+  select(
+  Code_entite_geographique,
+  Lible_entite_geographique,
+  CoordX_WGS84,
+  CoordY_WGS84,
+  Date,
+  Serie,
+  Resultat)
+```
 
 # Table de l'outil de diagnostic ODInvertebre
 
-```{r table oeb_i2m2_outildiag}
-oeb_i2m2_outildiag <- import_i2m2_outildiag  %>%
+```{r table data_i2m2_outildiag}
+data_i2m2_outildiag <- import_i2m2_outildiag  %>%
   pivot_longer(.,
    cols = 4:ncol(.),
    names_to = "Code_serie",
    values_to = "Resultat",
    values_drop_na = TRUE
  ) %>%
-  mutate(CdSite = sprintf("%08d", CODE_STATION), 
-         Resultat = as.character(Resultat)) %>%
+  mutate(CdSite = sprintf("%08d", CODE_STATION),
+         Resultat = as.numeric(Resultat),
+         Date = as.Date(DATE,'%d/%m/%Y')) %>%
   left_join(referentiel_sites, by="CdSite", copy=TRUE) %>%
   left_join(referentiel_series, by="Code_serie") %>%
   select(Code_entite_geographique = CdSite,
   Lible_entite_geographique = LbSite,
   CoordX_WGS84 = Coord_X_wgs84,
   CoordY_WGS84 = Coord_Y_wgs84,
-  Date = DATE,
+  Date,
+  Type,
   Serie,
   Resultat)
 
-oeb_i2m2_outildiag %>%
+data_i2m2_outildiag %>%
   summarise("Lignes" = n(),
             "Sites" = n_distinct(Code_entite_geographique),
             "Site inconnus" = n_distinct(Code_entite_geographique)-n_distinct(Lible_entite_geographique),
@@ -304,14 +326,14 @@ oeb_i2m2_outildiag %>%
 
 ```{r données manquantes outildiag}
 # Package mice pour représenter les données manquantes dans le jeu de données
-mice::md.pattern(oeb_i2m2_outildiag, rotate.names=T)
+mice::md.pattern(data_i2m2_outildiag, rotate.names=T)
 
 # 2020 : aucune donnée manquante
 ```
 ### Codes des sites inconnus
 
 ```{r}
-sites_inconnus <- oeb_i2m2 %>%
+sites_inconnus <- data_i2m2 %>%
   anti_join(referentiel_sites, by=c("Code_entite_geographique" = "CdSite"), copy=TRUE)%>%
   select(Code_entite_geographique)%>%
   union(sites_inconnus) %>%
@@ -328,34 +350,65 @@ write.table(paste0(params$chemin_source,"\\traitement\\",format.Date(today(),"%Y
 ### Histogrammes des séries de diagnostic Invertébrés
 
 ```{r series_histogram}
-oeb_i2m2_outildiag %>%
-  ggplot(aes(x=Resultat, color=as.factor(year(Date))))+
+data_i2m2_outildiag %>%
+  ggplot(aes(x=Resultat, color=as.factor(year(as.Date(Date,'%d/%m/%Y')))))+
   geom_histogram()+
   facet_wrap(~Serie)
 ```
 ### Comparaison des indices invertébrés I2M2 par année
 
 ```{r series_boxplot}
-oeb_i2m2_outildiag %>%
-  ggplot(aes(x=Serie, y=Resultat, color=as.factor(year(Date))))+
+data_i2m2_outildiag %>%
+  ggplot(aes(x=Serie, y=Resultat, color=as.factor(year(as.Date(Date,'%d/%m/%Y')))))+
   geom_boxplot()+
   coord_flip()+
   ggtitle("Scores des indices invertébrés I2M2")
 ```
+```{r table oeb_i2m2_outildiag}
+
+# Table au format de la base MYSQL
+oeb_i2m2_outildiag <- data_i2m2_outildiag  %>%
+  filter(!is.na(Lible_entite_geographique)) %>% # Retirer les sites absents du référentiel
+  mutate(Resultat = as.character(Resultat),
+         Date = format.Date(Date,'%d/%m/%Y')) %>%
+  select(Code_entite_geographique,
+  Lible_entite_geographique,
+  CoordX_WGS84,
+  CoordY_WGS84,
+  Date,
+  Type,
+  Serie,
+  Resultat)
+
+```
+
 ```{r ecriture_bdd}
+dbBegin(con_oeb_calcul_i2m2) # Début de la transaction avec la BDD
 
-db.insertion(con_oeb_calcul_i2m2,"oeb_i2m2_test",oeb_i2m2)
+#dbGetQuery(con_oeb_calcul_i2m2, "TRUNCATE TABLE oeb_i2m2_test")
+#dbGetQuery(con_oeb_calcul_i2m2, paste0("DELETE from oeb_calcul_i2m2.oeb_i2m2 where right(Date,4) = ",params$actualisation))
+db.insertion(con_oeb_calcul_i2m2,"oeb_i2m2",oeb_i2m2)
 
-  dbWriteTable(con_oeb_calcul_i2m2, "oeb_i2m2_test", oeb_i2m2, overwrite=TRUE, append=FALSE,
-             fileEncoding="Latin1")
+#dbGetQuery(con_oeb_calcul_i2m2, "TRUNCATE TABLE oeb_i2m2_outilsdiag_test")
+db.insertion(con_oeb_calcul_i2m2,"oeb_i2m2_outilsdiag",oeb_i2m2_outildiag)
+
 
 ```
 
 
 ```{r tables_bdd}
-tbl(con_oeb_calcul_i2m2,"oeb_i2m2")%>%collect()%>%
+tbl(con_oeb_calcul_i2m2,"oeb_i2m2_test")%>%collect()%>%
   mutate(Date = as.Date(Date,'%d/%m/%Y'))%>%summary()
 ```
 
+```{r fermeture_connexion}
+
+#dbCommit(con_oeb_calcul_i2m2)
+dbRollback(con_oeb_calcul_i2m2)
+
+dbDisconnect(con_oeb_calcul_i2m2)
+
+
+```
 
 
