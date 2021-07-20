@@ -1,0 +1,116 @@
+---
+title: "Intégration des données des prélèvements en eaux brutes"
+params:
+  reseau_piezo: '0400000020'
+  date_debut: 2019-01-01
+  date_fin: 2020-01-01
+  departements: '22,29,35,56,50,44,49,53'
+  pagination: 10000
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+library(config) # Utilisation d'un fichier de configuration, cf  https://db.rstudio.com/best-practices/managing-credentials/#stored-in-a-file-with-config
+library(tidyverse)
+library(DBI) # pour les connexions aux BDD
+library(RPostgreSQL) # driver postgres
+library(RMariaDB) # driver
+library(RMySQL)
+library(lubridate) # calcul sur les dates
+
+library(httr) #
+library(jsonlite)
+
+# Fonction pour traduire la réponse de l'API
+api_reponse <- function(request) {
+  
+case_when(request$status_code==200 ~ "OK, tous les résultats sont présents dans la réponse",
+          request$status_code==206 ~ "OK, il reste des résultats",
+          request$status_code==400 ~ "Requête incorrecte",
+            TRUE ~ "Autre réponse")
+}
+
+# Fonction pour requêter l'API Hub'Eau
+
+get_hubeau <- function(path, query) {
+  
+  response <- GET(url = path, query = query) %>% 
+  content(as = "text", encoding = "UTF-8") %>%
+  fromJSON(flatten = TRUE)
+  
+data = response$data # Le jeu de données est dans l'objet "data"
+
+if(response$count > query$size) { # Si la taille de page est plus petite que le nb de résultats, faire une boucle pour les pages suivantes
+  
+pages <- ceiling(response$count/query$size)
+
+# Affichage d'une barre de progression
+pb <- winProgressBar(title = "Récupération des chroniques", min = 0,
+                     max = pages, width = 300)
+
+for(i in 2:pages){
+  
+  query$page <- i
+  
+  response_i <- GET(url = path, query = query) %>% 
+  content(as = "text", encoding = "UTF-8") %>%
+  fromJSON(flatten = TRUE)
+
+data <- rbind(data, response_i$data) # Concaténation des lignes récupérées
+
+setWinProgressBar(pb, i, title=paste( round(i/pages*100, 0), "% chargé")) # Avancement de la barre de progression
+
+} # Fin boucle for
+
+close(pb)
+
+} # Fin if
+
+return(data)
+  } # Fin get_hubeau
+```
+
+
+Requête API Hubeau des points de prélèvement sur les départements BZH et limitrophes : https://hubeau.eaufrance.fr/api/v1/prelevements/referentiel/points_prelevement?code_departement=35%2C22%2C29%2C56%2C44%2C49%2C53%2C50&date_exploitation=2019-12-31&size=10000
+
+```{r hubeau}
+
+# Récupération des infos sur les ouvrages de prélèvement
+
+# Liste des paramètres de la requête
+query_stations = list(
+  code_departement=params$departements,
+  format='json',
+  size=params$pagination
+  )
+
+# Requête des stations
+hubeau_stations <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/prelevements/referentiel/ouvrages?", query = query_stations)
+
+# Récupération des chroniques
+
+# Liste des paramètres de la requête
+query_chroniques = list(
+                 code_bss = params$departements,
+                 format = 'json',
+                 size = params$pagination,
+                 date_debut_mesure = params$date_debut,
+                 date_fin_mesure = as.Date(params$date_fin)-1)
+
+# Requête des chroniques
+hubeau_chroniques <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/prelevements/chroniques?", query=query_chroniques)
+```
+
+```{r carte_points_prelevement}
+hubeau_stations %>%
+  filter(Serie == "Ind Invert Multimetrique")%>%
+leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(~CoordX_WGS84, 
+                   ~CoordY_WGS84,
+                   color=~as.factor(Resultat>0.5),
+                   radius = 1,
+                   opacity = 1,
+                   label=~Lible_entite_geographique,
+                   popup=~Code_entite_geographique)
+```
