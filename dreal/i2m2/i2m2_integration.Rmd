@@ -3,6 +3,7 @@ title: "Intégration des données Indice invertébrés multimétrique (I2M2)"
 output: html_notebook
 params:  
   chemin_source: 'O:\01.BD_EAU\DREAL\I2M2'
+  chemin_destination: 'O:\04.DATAVISUALISATION\INDICATEURS_BIOLOGIE\I2M2'
   actualisation: '2020'
 ---
 
@@ -382,7 +383,7 @@ oeb_i2m2_outildiag <- data_i2m2_outildiag  %>%
 
 ```
 
-```{r ecriture_bdd}
+```{r ecriture_bdd, eval=FALSE, include=FALSE}
 dbBegin(con_oeb_calcul_i2m2) # Début de la transaction avec la BDD
 
 #dbGetQuery(con_oeb_calcul_i2m2, "TRUNCATE TABLE oeb_i2m2_test")
@@ -397,11 +398,11 @@ db.insertion(con_oeb_calcul_i2m2,"oeb_i2m2_outilsdiag",oeb_i2m2_outildiag)
 
 
 ```{r tables_bdd}
-tbl(con_oeb_calcul_i2m2,"oeb_i2m2_test")%>%collect()%>%
+tbl(con_oeb_calcul_i2m2,"oeb_i2m2")%>%collect()%>%
   mutate(Date = as.Date(Date,'%d/%m/%Y'))%>%summary()
 ```
 
-```{r fermeture_connexion}
+```{r fermeture_connexion, eval=FALSE, include=FALSE}
 
 #dbCommit(con_oeb_calcul_i2m2)
 dbRollback(con_oeb_calcul_i2m2)
@@ -410,5 +411,57 @@ dbDisconnect(con_oeb_calcul_i2m2)
 
 
 ```
+# Exporte le fichier Geobretagne du jeu de données
 
+```{r export_gide}
+# Cree le fichier GIDE du jeu de données
+
+# A remplacer par une vue
+
+tbl(con_oeb_calcul_i2m2,"oeb_i2m2_outilsdiag") %>% 
+  select(Code_entite_geographique,
+           Lible_entite_geographique,
+           CoordX_WGS84,
+           CoordY_WGS84,
+           Date,
+           Serie,
+           Resultat)%>%
+  union(tbl(con_oeb_calcul_i2m2,"oeb_i2m2"))%>%
+  filter(!is.na(CoordX_WGS84))%>%
+  mutate(Source = "Traitement OEB, source Dreal, SEEE",
+         Mise_a_jour = as.Date(now()))%>%
+write.table(paste0(params$chemin_destination,"\\GIDE\\oeb_eau_i2m2_ce.csv"), quote=TRUE, sep=';', row.names = FALSE)
+
+```
+
+# Exporte le fichier Geobretagne du jeu de données
+
+```{r export_geob}
+# Cree le fichier Geobretagne du jeu de données
+
+# A remplacer par une vue
+
+tbl(con_oeb_calcul_i2m2,"oeb_i2m2") %>% 
+  select(date_prel = Date,
+         cdsite = Code_entite_geographique,
+         lbsite = Lible_entite_geographique,
+         coordx = CoordX_WGS84,
+         coordy = CoordY_WGS84,
+           Serie,
+           Resultat)%>%
+  filter(!is.na(coordx) & Serie %in% c('7613 - Ind Invert Multimetrique',
+                                             '8050 - NbTaxonsI2M2contributifs',
+                                             '8054 - RichesseI2M2',
+                                             '8055 - OvovivipariteI2M2',
+                                             '8056 - PolyvoltinismeI2M2',
+                                             '8057 - AverageScorePerTaxonI2M2',
+                                             '8058 - IndiceShannonI2M2'))%>%
+  pivot_wider(names_from = "Serie", values_from = "Resultat")%>%
+  mutate(annee = right(date_prel,4),
+         datation = paste0(right(date_prel,4),"/12/31"),
+         source = "Traitement OEB, source Dreal, SEEE",
+         maj = as.Date(now()))%>%
+  relocate(c("annee", "datation"))%>%
+write.table(paste0(params$chemin_destination,"\\GEOB\\oeb_eau_i2m2_ce.csv"), quote=FALSE, sep=';', row.names = FALSE, col.names = c('annee','datation','date_prel','cdsite','lbsite','coordx','coordy','source','maj','7613 - Ind Invert Multimetrique','8050 - NbTaxonsI2M2contributifs','8054 - RichesseI2M2','8055 - OvovivipariteI2M2','8056 - PolyvoltinismeI2M2','8057 - AverageScorePerTaxonI2M2','8058 - IndiceShannonI2M2'))
+```
 
