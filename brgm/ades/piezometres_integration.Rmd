@@ -3,8 +3,8 @@ title: "Integration des données piezometriques"
 output: html_notebook
 params:
   reseau_piezo: '0400000020'
-  date_debut: 2021-06-01
-  date_fin: 2021-07-01
+  date_debut: 2021-07-01
+  date_fin: 2021-08-01
   pagination: 5000
 ---
 
@@ -162,11 +162,6 @@ query_chroniques = list(
 hubeau_chroniques <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques?", query=query_chroniques)
 ```
 
-Réponse de Hub'eau :
-
-- Stations : 
-- Chroniques : 
-
 ```{r}
 all_equal(db_piezometres, hubeau_stations)
 
@@ -222,6 +217,7 @@ Dateintegration)
 db.insertion(con = con_mysql_local, table = "oeb_tbi_variationnappe_tmp", data = oeb_tbi_variationnappe_tmp)
 
 # 2021-07-08 : 1453 lignes insérées pour juin 2021
+# 2021-08-16 : 1559 lignes insérées pour juillet 2021
 ```
 
 

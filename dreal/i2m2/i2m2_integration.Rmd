@@ -245,6 +245,8 @@ data_i2m2 %>%
 sites_inconnus <- data_i2m2  %>%
   anti_join(referentiel_sites, by=c("Code_entite_geographique" = "CdSite"), copy=TRUE) %>%
   distinct(Code_entite_geographique)
+
+sites_inconnus
 ```
 ## Visualisation des données
 

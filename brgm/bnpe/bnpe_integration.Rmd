@@ -21,6 +21,11 @@ library(lubridate) # calcul sur les dates
 library(httr) #
 library(jsonlite)
 
+library(plotly) # Graphiques interactifs
+library(leaflet) # Cartes interactives
+
+
+
 # Fonction pour traduire la réponse de l'API
 api_reponse <- function(request) {
   
@@ -103,14 +108,13 @@ hubeau_chroniques <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/prele
 
 ```{r carte_points_prelevement}
 hubeau_stations %>%
-  filter(Serie == "Ind Invert Multimetrique")%>%
 leaflet() %>%
   addTiles() %>%
-  addCircleMarkers(~CoordX_WGS84, 
-                   ~CoordY_WGS84,
-                   color=~as.factor(Resultat>0.5),
+  addCircleMarkers(~longitude, 
+                   ~latitude,
+                   #color=~as.factor(Resultat>0.5),
                    radius = 1,
                    opacity = 1,
-                   label=~Lible_entite_geographique,
-                   popup=~Code_entite_geographique)
+                   label=~nom_ouvrage,
+                   popup=~nom_commune)
 ```

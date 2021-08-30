@@ -76,7 +76,8 @@ con_mysql_local <- dbConnect(odbc::odbc(),
                              host = conf$server,
                              UID = conf$uid,
                              PWD = conf$pwd,
-                             database = "oeb_ars_cyano")
+                             database = "oeb_ars_cyano",
+                             encoding = "latin1")
 
 conf <- config::get("postgres_dev")
 
@@ -86,7 +87,8 @@ con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
                           UID = conf$uid,
                           PWD = conf$pwd,
                           Port = conf$port,
-                          database = conf$database)
+                          database = conf$database,
+                             encoding = "latin1")
 
   
 dbListTables(con_mysql_local) # Lister les tables de la base
