@@ -1,0 +1,59 @@
+---
+title: "Integration des données piezometriques"
+output: html_notebook
+params:
+  reseau_piezo: '0400000020'
+  date_debut: 2021-07-01
+  date_fin: 2021-08-01
+  pagination: 5000
+---
+
+# Objet
+
+Intégration des données des qualitomètres (suivi de la qualité des eaux souterraines)
+
+Source : ADES
+
+CdParametre : 1340 (Nitrates)
+CdSupport : 3 (Eau)
+CdMilieu : 4 (Eaux souterraines)
+CdTypeSiteSurv : 4 (Point d'eau (E. souterraine))
+574 sites de surveillance
+
+Réseaux : RNSISEAU, FRGSOS, FRGSOO et RBESOUNO3LB
+
+DC concernés :
+BRETAGNE : 0000000028, 0400000020, 0400000124, 0400000127, 0400000128, 0400000192, 0400003006 , 0400001001,0400001002
+PdL : 0000000028, 0400000124, 0400000127, 0400000128, 0400000201,0400001001,0400001002, 0400003006
+
+Perimetre : Depuis 1995
+
+# Informations sur la donnée
+
+Concernant la mise à jour des données santé, elle est effectuée dans Ades deux fois par an, une fois en début d’année avec les données du 1er semestre de l’année précédente et une seconde fois, en aout ou début septembre avec celles du 2nd semestre de l’année précédente.
+
+> Les données source sont issues d'un export de la BDD ADES réalisé en septembre 2015. Les stations sont rattachées aux réseaux RNSISEAU, FRGSOS, FRGSOO et RBESOUNO3LB. Pour chaque point d’eau, la concentration maximale (exprimée en mg/l) en nitrate correspond à la valeur maximale des analyses dans le domaine de validité ou inférieure au seuil de quantification, pour la substance considérée. 
+En application des règles de calcul du SEQ-Eaux souterraines – Classes de qualité par altération (code couleur - valeurs seuils (maximale)) :
+- Rouge - Mauvais : [max] supérieur ou égal à 100 mg/l
+- Orange - Médiocre : 50 inférieur ou égal à [max] inférieur à 100 mg/l
+- Jaune - Moyen : 20 inférieur ou égal à [max] inférieur à 50mg/l
+- Vert - Bon : 10 inférieur ou égal à [max] inférieur à 20 mg/l
+- Bleu - Très bon : [max] inférieur à 10 mg/l
+
+Cf carte DREAL
+
+http://www.bretagne.developpement-durable.gouv.fr/IMG/pdf/eau_en_bretagne_2014_4.pdf
+
+>Pour la région Bretagne, le suivi de 54 stations en 2014 montre une situation globalement stable depuis 2007. Les ¾ des stations suivies respectent le bon état (<50 mg/l). On observe toutefois une situation relativement dégradée sur la partie nord du Finistère et le Trégor où certaines des valeurs moyennes des concentrations observées dépassent 100 mg/l.
+
+# Données à bancariser
+
+Séries par entité géographique (site) :
+
+- Concentration minimale, maximale, moyenne (annuelle)
+- Concentration (journalière)
+- Nombre de prélèvements > 50mg/l
+- Nombre de prélèvements
+- Station en bon état (DCE)
+- Stations suivies
+- Stations évaluées (DCE)
