@@ -1,0 +1,695 @@
+---
+title: "Intégration des données d'échouages d'ulves (CEVA)"
+output: html_notebook
+params:
+  chemin_source: 'O:/01.BD_EAU/CEVA/Sources/2021'
+  actualisation: '2020'
+  contexte: developpement
+---
+
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+library(config) # Utilisation d'un fichier de configuration, cf  https://db.rstudio.com/best-practices/managing-credentials/#stored-in-a-file-with-config
+library(tidyverse)
+library(DBI) # pour les connexions aux BDD
+library(RPostgreSQL) # driver postgres
+library(RMariaDB) # driver
+library(RMySQL)
+library(lubridate)
+library(plotly) # Graphes interactifs
+
+library("readxl")
+```
+
+```{r connexion bd Eau}
+
+conf <- config::get("mysql_local")
+
+con_mysql_local <- dbConnect(odbc::odbc(),
+                             Driver=conf$driver,
+                             host = conf$server,
+                             UID = conf$uid,
+                             PWD = conf$pwd,
+                             database = "oeb_traitement_av",
+                             encoding = "latin1")
+
+conf <- config::get("postgres_dev")
+
+con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
+                          Driver       = conf$driver,
+                          servername   = conf$server,
+                          UID = conf$uid,
+                          PWD = conf$pwd,
+                          Port = conf$port,
+                          database = conf$database,
+                             encoding = "latin1")
+
+  
+dbListTables(con_mysql_local) # Lister les tables de la base
+
+```
+
+```{r lecture_source}
+
+# Liste des fichiers dont le nom termine par l'année d'actualisation
+fichier <- list.files(params$chemin_source, pattern = "^[^~].*\\.xlsx$")
+
+# Arrêt si plus d'un fichier correspondant au critère
+if (length(fichier)>1) {
+  print('Plusieurs fichiers source...')
+  ABORT_ABORT()
+}
+
+# Liste des onglets du fichier
+sheets <- excel_sheets(path=paste0(params$chemin_source,'/',fichier[1]))
+
+sheets
+```
+
+- Source de la donnée : Fichier d'échange
+- Fournisseur : CEVA
+- contact : Sylvain Ballu, [sylvain.ballu@ceva.fr](mailto:sylvain.ballu@ceva.fr)
+- Dossier d'import : [`r params$chemin_source`](`r params$chemin_source`)
+- Fichier : [`r fichier`](`r paste0(params$chemin_source,'/',fichier)`)
+
+# Sites de suivi
+
+```{r}
+fichier_sites <- "oeb_algues_vertes_sites - BV.csv"
+
+import_sites_bv <- read.table(paste0(params$chemin_source,'/../../Traitement/',fichier_sites), header = TRUE, sep=";")
+
+data_sites_bv <- import_sites_bv %>%
+  select(Cd_Site = Code,
+         Lb_Site = NOM_SITE,
+         Type_Site = NATURE_SITE,
+         Coord_x_wgs84 = Coord_X_WGS84,
+         Coord_y_wgs84 = Coord_Y_WGS84,
+         Coord_x = Coord_X,
+         Coord_y = Coord_Y,
+         Lb_Baie)
+
+fichier_sites_ega <- "oeb_algues_vertes_sites.csv"
+
+import_sites_ega <- read.table(paste0(params$chemin_source,'/../../Traitement/',fichier_sites_ega), header = TRUE, sep=";", quote="")
+
+# Table de correspondance Sites / EGA
+data_sites_ega <- import_sites_ega %>%
+  select(Cd_Site = Code,
+         Cd_entit_geo_associee,
+         Lb_entit_geo_associee,
+         Type_entit_geo_associee)
+
+# Données des sites de suivi
+data_sites <- import_sites_ega %>%
+  select(Cd_Site = Code,
+         Lb_Site = NOM_SITE,
+         Type_Site = NATURE_SITE,
+         Coord_X_WGS84,
+         Coord_Y_WGS84,
+         Coord_X,
+         Coord_Y,
+         PLAV)%>%
+  distinct(Cd_Site, .keep_all = TRUE)
+
+# Table de correspondance codes / libellés de sites
+Cd_Lb_sites <- import_sites_ega %>%
+  distinct(Code,NOM_SITE)%>%
+  select(Cd_Site= Code, Lb_Site = NOM_SITE)
+```
+
+# Occurence interannuelle par site
+```{r import_occurence_sites}
+import_occurences <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
+          sheet=sheets[3])%>%
+  filter(!is.na(NOM_SITE))
+
+data_occurences <- import_occurences %>%
+  mutate(Lb_Site = NOM_SITE,
+         Type_Site = NATURE_SITE,
+         Serie = "Occurence d'échouages",
+         Periode = "2007-2020",
+         Resultat = `occ_2007_2020`)%>%
+  select(Lb_Site, Type_Site, Serie, Periode, Resultat)
+```
+
+- `r data_occurences%>%tally()%>%pull()` sites importés, dont :
+ - `r data_occurences%>%filter(Type_Site=="sableux")%>%tally()%>%pull()` de type "sableux"
+ - `r data_occurences%>%filter(Type_Site=="vasière")%>%tally()%>%pull()` de type "vasière"
+ 
+```{r graphe_occurence}
+data_occurences %>%
+  arrange(Resultat)%>%
+  mutate(Lb_Site=factor(Lb_Site, levels=Lb_Site))%>%
+  ggplot(aes(x=Resultat,fill=Type_Site))+
+  geom_histogram()+
+  xlab("Occurence 2007-2020")
+```
+# Données annuelles des sites sableux
+
+Rq : de 2002 à 2006, les surfaces étaient mesurées en août et octobre mais pas septembre ;  pour ces années,  le cumul intègre la moyenne août-octobre à la place de septembre
+
+```{r import_sf_sites_sableux, eval=FALSE, include=FALSE}
+# Lecture fichier Excel
+import_sf_sableux <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
+          sheet=sheets[2])%>%
+  filter(!is.na(NOM_SITE))
+
+# table des surfaces max et cumulées (3-4 inventaires) sur sites sableux
+data_sf_sableux_agg <- import_sf_sableux %>%
+  select(!contains(c("Dep","NATURE_SITE","NumGeo","MOYENNE","MAX_MAX","NO_DATA","Occ")))%>%
+  # transformer en tableau long les séries de surfaces
+  pivot_longer(cols = contains(c("CUMUL","MAX")), names_to = c("Calcul","Nb_Inventaires","Periode"), names_sep = "_", values_to="Resultat") %>%
+  # extraire le nb d'inventaires à partir du nom de la série
+  mutate(Nb_Inventaires = as.integer(substr(Nb_Inventaires,1,1))) %>%
+  # retirer les surfaces cumulées pour 4 inventaires
+  filter(!(Calcul == "CUMUL" & Nb_Inventaires == 4))%>%
+  # retirer des résultats -999 (Nom mesurés mais >0)
+  filter(Resultat > 0)%>%
+  # nommer des séries
+  mutate(Resultat=as.numeric(Resultat),
+         Serie = paste0(case_when(Calcul == "CUMUL" ~ "Surface cumulée annuelle (",
+                                  Calcul == "MAX" ~ "Surface maximale annuelle ("), Nb_Inventaires, "_inv)"),
+         Unite="ha",
+         Source="CEVA")%>%
+  # selectionner les colonnes
+  select(Lb_Site = NOM_SITE,
+         Resultat,
+         Calcul,
+         Periode,
+         Serie,
+         Nb_Inventaires,
+         Unite,
+         Source)
+```
+
+# Données des suivis renforcés (7 inventaires) : Données par inventaire et annuelles
+
+```{r import_sf_sites_sableux_renforces, eval=FALSE, include=FALSE}
+# Lecture fichier Excel
+import_sf_sableux_renforces <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
+          sheet=sheets[5]) %>%
+  filter(!is.na(nom_du_site)) %>% 
+  # On remplace le nom du site QUIBERON/SABLES BLANCS qui est désigné jusqu'ici par le nom "QUIBERON" (Cd_Site AV_120)
+  mutate(nom_du_site = str_replace(nom_du_site, "QUIBERON/SABLES BLANCS", "QUIBERON"))
+  
+
+# table des surfaces par inventaire sur les sites à suivi renforcé
+data_sf_sableux_renforces <- import_sf_sableux_renforces %>%
+  select(!contains(c("Dep","NATURE_SITE","NumGeo","sites_PLAV","MOY","MAX","CUMUL")))%>%
+  # transformer en tableau long les séries de surfaces
+  pivot_longer(cols = contains(c("SF")), names_to = c("Calcul","Annee","Mois"), names_sep = "_", values_to="Resultat")%>%
+  # nommer des séries
+  mutate(Resultat=as.numeric(Resultat),
+         Serie = "Surface",
+         Periode = paste0(Annee,"_",Mois),
+         Nb_Inventaires = 1,
+         Unite="ha",
+         Source="CEVA")%>%
+  # selectionner les colonnes
+  select(Lb_Site = nom_du_site,
+         Resultat,
+         Calcul,
+         Periode,
+         Annee,
+         Mois,
+         Serie,
+         Nb_Inventaires,
+         Unite,
+         Source)
+
+# table des surfaces max et cumulées (7 inventaires) sur sites sableux
+data_sf_sableux_renforces_agg <- import_sf_sableux_renforces %>%
+  select(!contains(c("Dep","NATURE_SITE","NumGeo","sites_PLAV","SF","MOY","MAX_CUMUL","MOY_CUMUL")))%>%
+  # transformer en tableau long les séries de surfaces
+  pivot_longer(cols = contains(c("CUMUL","MAX")), names_to = c("Calcul","Nb_Inventaires","Periode"), names_sep = "_", values_to="Resultat") %>%
+  # extraire le nb d'inventaires à partir du nom de la série
+  mutate(Nb_Inventaires = as.integer(substr(Nb_Inventaires,1,1))) %>%
+  # retirer les surfaces cumulées pour 4 inventaires
+  filter(!(Calcul == "CUMUL" & Nb_Inventaires == 4))%>%
+  # retirer des résultats -999 (Nom mesurés mais >0)
+  filter(Resultat > 0)%>%
+  # nommer des séries
+  mutate(Resultat=as.numeric(Resultat),
+         Serie = paste0(case_when(Calcul == "CUMUL" ~ "Surface cumulée annuelle (",
+                                  Calcul == "MAX" ~ "Surface maximale annuelle ("), Nb_Inventaires, "_inv)"),
+         Unite="ha",
+         Source="CEVA")%>%
+  # selectionner les colonnes
+  select(Lb_Site = nom_du_site,
+         Resultat,
+         Calcul,
+         Periode,
+         Serie,
+         Nb_Inventaires,
+         Unite,
+         Source)
+```
+
+```{r calcul_surfaces_moyennes_annuelles, eval=FALSE, include=FALSE}
+# calculer les surfaces moyennes par inventaire (cumul/nb d'inventaires)
+data_sf_moy_sableux <- data_sf_sableux_agg %>% 
+  # ajouter le jeu de données des sites renforcés
+  union(data_sf_sableux_renforces_agg) %>%
+  # ne garder que la série des surfaces cumulées
+  filter(grepl("Surface cumulée annuelle",Serie))%>% 
+  # calculer la moyenne
+  mutate(Resultat = Resultat/Nb_Inventaires) %>%
+  # nommer la série
+  mutate(Serie = paste0("Surface moyenne annuelle (",Nb_Inventaires,"_inv)"),
+         Calcul = "MOY")
+```
+
+```{r calcul_surfaces_cumulees_saison, eval=FALSE, include=FALSE}
+# Calculer les surfaces cumulées saisonnières (août-sept, avril-mai) pour les sites à suivi renforcé
+data_sf_sableux_renforces_saison <- data_sf_sableux_renforces %>% 
+  group_by(Lb_Site,Annee,Unite,Source)%>%
+  summarise(cumul_aout_sept = sum((Mois %in% c('08','09')) * Resultat),
+         cumul_avril_mai = sum((Mois %in% c('04','05')) * Resultat))%>%
+  ungroup()%>%
+  pivot_longer(cols = contains("cumul"), names_to = "Serie", values_to="Resultat")%>%
+  # nommer des séries
+  mutate(Calcul = "CUMUL",
+         Nb_Inventaires = case_when(Serie == "cumul_aout_sept" ~ 2,
+                                  Serie == "cumul_avril_mai" ~ 2),
+        Serie = case_when(Serie == "cumul_aout_sept" ~ paste0("Surface cumulée annuelle (août septembre - ", Nb_Inventaires,"_inv)"),
+                                  Serie == "cumul_avril_mai" ~ paste0("Surface cumulée annuelle (avril mai - ", Nb_Inventaires,"_inv)")))%>%
+  select(Lb_Site,Periode=Annee,Unite,Calcul,Source,Serie,Resultat,Nb_Inventaires)
+```
+```{r graphe_cumul_surfaces_saison, eval=FALSE, fig.height=4, fig.width=12, include=FALSE}
+# Graphique des surfaces cumulées saisonnières (août-sept, avril-mai, avril-oct) pour les sites à suivi renforcé
+data_sf_sableux_renforces_saison %>%
+  #filter(Lb_Site == "MORIEUX") %>%
+    group_by(Periode,Serie) %>%
+    summarize(Somme = sum(Resultat, na.rm = TRUE))%>%
+  ggplot(aes(x=as.factor(Periode), y=Somme, fill=Serie))+
+  geom_col(position="dodge")+
+  xlab("Periode")+
+  ylab("Surface cumulée")
+```
+
+```{r compilation_surfaces_annuelles_sableux, eval=FALSE, include=FALSE}
+# Unir les séries de données traitées
+data_sf_sableux_annee <- data_sf_sableux_agg %>%
+  # ajouter le jeu de données des moyennes annuelles
+  union(data_sf_moy_sableux)%>% 
+  # ajouter le jeu de données des sites renforcés
+  union(data_sf_sableux_renforces_agg)%>%
+  # Ajouter le jeu de données des cumuls saisonniers sur les sites à suivi renforcé
+  union(data_sf_sableux_renforces_saison)
+```
+
+```{r graphe_surfaces_annee, eval=FALSE, fig.height=4, fig.width=12, include=FALSE}
+# Graphique des surfaces cumulées, tous sites confondus
+data_sf_sableux_annee %>%
+  filter(Lb_Site == "SAINT-MICHEL-EN-GREVE")%>%
+  filter(grepl("Surface maximale annuelle",Serie))%>% 
+    group_by(Periode,Serie) %>%
+    summarize(Somme = sum(Resultat, na.rm = TRUE)/3)%>%
+  ggplot(aes(x=as.factor(Periode), y=Somme, fill=Serie))+
+  geom_col(position="dodge")+
+  xlab("Periode")+
+  ylab("Surface moyenne annuelle (3_inv)")
+```
+
+```{r calcul_surfaces_interannuelles, eval=FALSE, include=FALSE}
+# Calcul des cumuls, max et moy interannuelles
+# RQ : Il y a sûrement un moyen de faire les 3 calculs d'un coup
+
+# Calculer les surfaces maximales interannuelles
+data_sf_sableux_max_interannee <- data_sf_sableux_annee %>%
+  #filter(Periode != c('2020')) %>%
+  filter(Calcul == "MAX") %>%
+  group_by(Lb_Site, Calcul, Serie, Unite, Source) %>%
+  summarise(Resultat = max(Resultat, na.rm = TRUE),
+            Periode = paste0(min(Periode),'-',max(Periode)),
+            Nb_Inventaires = sum(Nb_Inventaires,na.rm = TRUE)
+            )%>%
+  mutate(Serie = str_replace(Serie,"annuelle","interannuelle"))
+
+# Calculer les surfaces maximales interannuelles
+data_sf_sableux_moy_interannee <- data_sf_sableux_annee %>%
+  #filter(Periode != c('2020')) %>%
+  filter(Calcul == "MOY") %>%
+  group_by(Lb_Site, Calcul, Serie, Unite, Source) %>%
+  summarise(Resultat = mean(Resultat, na.rm = TRUE),
+            Periode = paste0(min(Periode),'-',max(Periode)),
+            Nb_Inventaires = sum(Nb_Inventaires,na.rm = TRUE)
+            )%>%
+  mutate(Serie = str_replace(Serie,"annuelle","interannuelle"))
+
+# Calculer les surfaces cumulées interannuelles
+data_sf_sableux_cumul_interannee <- data_sf_sableux_annee %>%
+  #filter(Periode != c('2020')) %>%
+  filter(Calcul == "CUMUL") %>%
+  group_by(Lb_Site, Calcul, Serie, Unite, Source) %>%
+  summarise(Resultat = sum(Resultat, na.rm = TRUE),
+            Periode = paste0(min(Periode),'-',max(Periode)),
+            Nb_Inventaires = sum(Nb_Inventaires,na.rm = TRUE)
+            )%>%
+  mutate(Serie = str_replace(Serie,"annuelle","interannuelle"))
+
+# Aggrégation des données interannuelles
+data_sf_sableux_interannee <- data_sf_sableux_max_interannee %>%
+  union(data_sf_sableux_moy_interannee) %>%
+  union(data_sf_sableux_cumul_interannee)%>% 
+  ungroup()
+
+# Aperçu de la table
+data_sf_sableux_interannee %>%
+  filter(Lb_Site == "SAINT-MICHEL-EN-GREVE")
+```
+
+# Compilation du jeu de données complet
+
+```{r data_sf, eval=FALSE, include=FALSE}
+# jeu de données des surfaces par inventaires sur les sites à suivi renforcé
+data_sf <- data_sf_sableux_renforces %>%
+  select(-Mois, -Annee) %>%
+  # Ajouter le Jeu de données des surfaces cumulées et maximales annuelles
+  union(data_sf_sableux_annee) %>%
+  # Ajouter le Jeu de données des surfaces moyennes annuelles
+  union(data_sf_moy_sableux) %>%
+  # Ajouter le Jeu de données des surfaces cumulées et maximales interannuelles
+  union(data_sf_sableux_interannee)%>%
+  left_join(Cd_Lb_sites, by="Lb_Site")
+  
+
+data_sf
+```
+
+```{r series, eval=FALSE, include=FALSE}
+# Liste des séries de données
+data_sf %>%
+  distinct(Serie)%>%
+  arrange(Serie)
+```
+# table au format oeb_donnees_ceva / oeb_ceva_tbi
+
+```{r table_oeb_ceva_tbi, eval=FALSE, include=FALSE}
+oeb_ceva_tbi <- data_sf %>%
+  select(-Lb_Site) %>%
+  full_join(data_sites, by="Cd_Site") %>%
+  full_join(data_sites_ega, by="Cd_Site") %>%
+  select(Cd_Site,
+         resultat = Resultat,
+         Periode,
+         Serie,
+         unite = Unite,
+         Lb_Site,
+         Type_Site,
+         Coord_x_wgs84 = Coord_X_WGS84,
+         Coord_y_wgs84 = Coord_Y_WGS84,
+         Coord_x_wgs84_web = Coord_X,
+         Coord_y_wgs84_web = Coord_Y,
+         Cd_entite_geo_associe = Cd_entit_geo_associee,
+         Lb_entite_geo_associe = Lb_entit_geo_associee,
+         Type_entite_geo_associe = Type_entit_geo_associee,
+         PLAV)
+
+oeb_ceva_tbi 
+```
+
+
+```{r table_oeb_donnees_ceva, eval=FALSE, include=FALSE}
+oeb_donnees_ceva <- data_sf %>%
+  select(Cd_Site, resultat = Resultat, Periode, Serie, unite = Unite)
+
+oeb_donnees_ceva
+```
+
+# Charger les données dans la base
+
+```{r load_data, eval=FALSE, include=FALSE}
+
+#dbWriteTable(con_mysql_local, "oeb_donnees_ceva_test", oeb_donnees_ceva, overwrite=TRUE, append=FALSE,
+                             encoding = "latin1")
+
+#dbWriteTable(con_mysql_local, "oeb_ceva_tbi_test", oeb_ceva_tbi, overwrite=TRUE, append=FALSE,
+                             encoding = "latin1")
+```
+
+# Version 2 du traitement
+
+## Données des surfaces par inventaire (sites à suivi renforcé) : Site, Annee, Mois, Surface
+```{r data_sf_mois_sableux}
+
+# Lecture fichier Excel
+import_sf_mois_sableux <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
+          sheet=sheets[5]) %>%
+  filter(!is.na(nom_du_site)) %>% 
+  # On remplace le nom du site QUIBERON/SABLES BLANCS qui est désigné jusqu'ici par le nom "QUIBERON" (Cd_Site AV_120)
+  mutate(nom_du_site = str_replace(nom_du_site, "QUIBERON/SABLES BLANCS", "QUIBERON"))
+  
+
+# table des surfaces par inventaire sur les sites à suivi renforcé
+data_sf_mois_sableux <- import_sf_mois_sableux %>%
+  select(!contains(c("Dep","NATURE_SITE","NumGeo","sites_PLAV","MOY","MAX","CUMUL")))%>%
+  # transformer en tableau long les séries de surfaces
+  pivot_longer(cols = contains(c("SF")), names_to = c("Calcul","Annee","Mois"), names_sep = "_", values_to="Surf")%>%
+  # attributs complementaires
+  mutate(Nb_Inventaires = 1,
+         Unite="ha",
+         Source="CEVA")%>%
+  # selectionner les colonnes
+  select(Lb_Site = nom_du_site,
+         Surf,
+         Annee,
+         Mois,
+         Nb_Inventaires,
+         Unite,
+         Source)%>%
+  left_join(Cd_Lb_sites, by="Lb_Site")
+
+data_sf_mois_sableux
+
+```
+## Graphe données moyennes interannuelles par mois
+
+```{r graphe_sf_mois_sableux}
+data_sf_mois_sableux %>%
+  group_by(Mois) %>%
+  arrange(Mois) %>%
+  summarise(Surf_moy = sum(Surf, na.rm = TRUE)/n_distinct(Annee)) %>%
+  ggplot(aes(x = Mois, y = Surf_moy))+
+  geom_bar(stat="identity")+
+  coord_flip()
+```
+
+
+## Données des surfaces annuelles : Site, Annee, Saison, Nb_inventaires, Aggrégation des surfaces : Max, Cumul
+
+```{r data_sf_annee_sableux}
+
+# Lecture fichier Excel
+import_sf_annee_sableux <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
+          sheet=sheets[2])%>%
+  filter(!is.na(NOM_SITE))
+
+# table des surfaces annuelles max et cumulées (3-4 inventaires) sur sites sableux
+data_sf_annee_sableux <- import_sf_annee_sableux %>%
+  select(!contains(c("Dep","NATURE_SITE","NumGeo","MOYENNE","MAX_MAX","NO_DATA","Occ")))%>%
+  # transformer en tableau long les séries de surfaces
+  pivot_longer(cols = contains(c("CUMUL","MAX")), names_to = c(".value","Nb_Inventaires","Annee"), names_pattern = "(.+)_(.+)_(.+)") %>%
+  # extraire le nb d'inventaires à partir du nom de la série
+  mutate(Nb_Inventaires = as.integer(substr(Nb_Inventaires,1,1))) %>%
+  # retirer des résultats -999 (Nom mesurés mais >0)
+  mutate(CUMUL = na_if(CUMUL, -999),
+         MAX = na_if(MAX, -999)
+         )%>%
+  # renseigner la saison
+  mutate(Saison = case_when(
+    Nb_Inventaires == 3 ~ "mai, juillet, septembre",
+    Nb_Inventaires == 4 ~ "mai, juillet, aout, octobre"),
+    Unite="ha",
+    Source="CEVA",
+    Surf_Cum = CUMUL,
+    Surf_Max = MAX,
+    Surf_Moy = CUMUL/Nb_Inventaires)%>%
+  # selectionner les colonnes
+  select(Lb_Site = NOM_SITE,
+         Annee,
+         Saison,
+         Nb_Inventaires,
+         Surf_Cum,
+         Surf_Max,
+         Surf_Moy,
+         Unite,
+         Source)
+
+data_sf_annee_sableux %>%
+  filter(Annee == "2013")
+```
+
+```{r data_sf_annee_sableux_saison}
+# Aggrégation des données mensuelles par saison
+
+## avril-octobre
+data_sf_annee_sableux_avril_oct <- data_sf_mois_sableux %>% 
+  group_by(Lb_Site, Annee,Unite,Source) %>%
+  summarise(Nb_Inventaires = sum(Nb_Inventaires, na.rm = TRUE),
+            Surf_Cum = sum(Surf, na.rm = TRUE),
+            Surf_Max = max(Surf, na.rm = TRUE),
+            Surf_Moy = sum(Surf, na.rm = TRUE)/sum(Nb_Inventaires, na.rm = TRUE)) %>%
+  mutate(Saison = "avril-octobre")%>%
+  ungroup()
+
+## avril-mai
+data_sf_annee_sableux_avril_mai <- data_sf_mois_sableux %>% 
+  group_by(Lb_Site, Annee,Unite,Source) %>%
+  filter(Mois %in% c('04','05')) %>%
+  summarise(Nb_Inventaires = sum(Nb_Inventaires, na.rm = TRUE),
+            Surf_Cum = sum(Surf, na.rm = TRUE),
+            Surf_Max = max(Surf, na.rm = TRUE),
+            Surf_Moy = sum(Surf, na.rm = TRUE)/sum(Nb_Inventaires, na.rm = TRUE)) %>%
+  mutate(Saison = "avril-mai")%>%
+  ungroup()
+  
+## aout-septembre
+  data_sf_annee_sableux_aout_sept <- data_sf_mois_sableux %>% 
+  group_by(Lb_Site, Annee,Unite,Source) %>%
+  filter(Mois %in% c('08','09')) %>%
+  summarise(Nb_Inventaires = sum(Nb_Inventaires, na.rm = TRUE),
+            Surf_Cum = sum(Surf, na.rm = TRUE),
+            Surf_Max = max(Surf, na.rm = TRUE),
+            Surf_Moy = sum(Surf, na.rm = TRUE)/sum(Nb_Inventaires, na.rm = TRUE)) %>%
+  mutate(Saison = "aout-septembre")%>%
+  ungroup()
+  
+```
+
+```{r data_sf_annee}
+# Jeu de données complet
+  
+data_sf_annee <- data_sf_annee_sableux %>%
+  union_all(data_sf_annee_sableux_avril_oct) %>%
+  union(data_sf_annee_sableux_avril_mai) %>%
+  union(data_sf_annee_sableux_aout_sept)%>%
+  left_join(Cd_Lb_sites, by="Lb_Site")
+  
+data_sf_annee
+```
+```{r graphe_donnees_annuelles, fig.height=4, fig.width=12}
+data_sf_annee %>%
+  filter(Lb_Site == "MORIEUX" &
+         Nb_Inventaires %in% c(3:4)
+         ) %>%
+  ggplot(aes(x=as.factor(Annee), y=Surf_Cum, fill=Saison)) +
+  geom_bar(stat = "identity", position = "dodge")
+```
+# Données interannuelles
+
+```{r data_sf_interannee}
+# Aggrégation interannuelle
+
+data_sf_interannee <-
+  data_sf_annee %>% 
+  group_by(Lb_Site,Saison)%>%
+  arrange(Annee)%>%
+  mutate(Periode = paste0(min(Annee),'-',Annee),
+         Nb_Inventaires = max(Nb_Inventaires),
+         Surf_Cum = cumsum(Surf_Cum)/row_number(),
+         Surf_Moy = cumsum(Surf_Cum)/row_number(),
+         Surf_Max = cumsum(replace_na(Surf_Max, 0))/row_number())%>%
+  ungroup()
+
+data_sf_interannee
+```
+
+```{r graphe_donnees_interannuelles, fig.height=4, fig.width=14}
+data_sf_interannee %>%
+  filter(Lb_Site == "MORIEUX") %>%
+  #filter(Saison == "mai, juillet, septembre") %>%
+  ggplot(aes(x=as.factor(Periode), y=Surf_Max, fill=Saison)) +
+  geom_bar(stat = "identity", position = "dodge")
+```
+
+# Tables au format BDD oeb_traitement_av (MySQL LOCAL)
+
+## oeb_donnees_ceva
+
+```{r table_oeb_donnees_ceva_2}
+serie_sf_annee <- data_sf_annee %>%
+  pivot_longer(cols = contains("Surf_"), names_prefix = "Surf_", names_to="Calcul", values_to="Resultat",
+  values_drop_na = TRUE) %>%
+  mutate(Periode = Annee,
+         Serie = paste0("Surface ",
+           case_when(Calcul == "Cum" ~ "cumulée",
+                     Calcul == "Max" ~ "maximale",
+                     Calcul == "Moy" ~ "moyenne"),
+           " annuelle (",
+           case_when(Saison == "mai, juillet, aout, octobre" ~ "mai octobre",
+                     Saison == "mai, juillet, septembre" ~ "mai septembre",
+                     Saison == "avril-octobre" ~ "avril octobre",
+                     Saison == "avril-mai" ~ "avril mai",
+                     Saison == "aout-septembre" ~ "août septembre"),
+           ' - ',
+           Nb_Inventaires,
+           "_inv)"
+           ))%>%
+  select(Cd_Site, Resultat, Periode, Serie, Unite)
+
+serie_sf_interannee <- data_sf_interannee %>%
+  pivot_longer(cols = contains("Surf_"), names_prefix = "Surf_", names_to="Calcul", values_to="Resultat",
+  values_drop_na = TRUE) %>%
+  mutate(Serie = paste0("Surface ",
+           case_when(Calcul == "Cum" ~ "cumulée",
+                     Calcul == "Max" ~ "maximale",
+                     Calcul == "Moy" ~ "moyenne"),
+           " interannuelle (",
+           case_when(Saison == "mai, juillet, aout, octobre" ~ "mai octobre",
+                     Saison == "mai, juillet, septembre" ~ "mai septembre",
+                     Saison == "avril-octobre" ~ "avril octobre",
+                     Saison == "avril-mai" ~ "avril mai",
+                     Saison == "aout-septembre" ~ "août septembre"),
+           ' - ',
+           Nb_Inventaires,
+           "_inv)"
+           ))%>%
+  select(Cd_Site, Resultat, Periode, Serie, Unite)
+
+serie_sf_mois_sableux <- data_sf_mois_sableux %>%
+  mutate(Serie = "Surface",
+         Resultat = Surf,
+         Periode = paste0(Annee,"_",Mois))%>%
+  select(Cd_Site, Resultat, Periode, Serie, Unite)
+
+
+serie_sf <- serie_sf_mois_sableux %>%
+  union(serie_sf_annee) %>%
+  union(serie_sf_interannee)
+
+oeb_donnees_ceva <- serie_sf
+```
+
+```{r table_oeb_ceva_tbi_2}
+oeb_ceva_tbi <- serie_sf %>%
+  full_join(data_sites, by="Cd_Site") %>%
+  full_join(data_sites_ega, by="Cd_Site") %>%
+  select(Cd_Site,
+         resultat = Resultat,
+         Periode,
+         Serie,
+         unite = Unite,
+         Lb_Site,
+         Type_Site,
+         Coord_x_wgs84 = Coord_X_WGS84,
+         Coord_y_wgs84 = Coord_Y_WGS84,
+         Coord_x_wgs84_web = Coord_X,
+         Coord_y_wgs84_web = Coord_Y,
+         Cd_entite_geo_associe = Cd_entit_geo_associee,
+         Lb_entite_geo_associe = Lb_entit_geo_associee,
+         Type_entite_geo_associe = Type_entit_geo_associee,
+         PLAV)
+```
+
+```{r chargement_bd_oeb_traitement_av, eval=FALSE, include=FALSE}
+
+dbWriteTable(con_mysql_local, "oeb_donnees_ceva_test2", oeb_donnees_ceva, overwrite=TRUE, append=FALSE,
+                             encoding = "latin1")
+
+dbWriteTable(con_mysql_local, "oeb_ceva_tbi_test2", oeb_ceva_tbi, overwrite=TRUE, append=FALSE,
+                             encoding = "latin1")
+```
+
