@@ -1,10 +1,11 @@
 ---
-title: "Integration des données piezometriques"
+title: "Integration des données qualitometriques"
 output: html_notebook
 params:
-  reseau_piezo: '0400000020'
-  date_debut: 2021-07-01
-  date_fin: 2021-08-01
+  codes_reseau: '0000000028,0400000020,0400000124,0400000127,0400000128,0400000192,0400003006,0400001001,0400001002,0400000201'
+  num_departement: '22,29,35,56,50,44,49,53'
+  date_debut: 2020-01-01
+  date_fin: 2020-12-31
   pagination: 5000
 ---
 
@@ -23,8 +24,8 @@ CdTypeSiteSurv : 4 (Point d'eau (E. souterraine))
 Réseaux : RNSISEAU, FRGSOS, FRGSOO et RBESOUNO3LB
 
 DC concernés :
-BRETAGNE : 0000000028, 0400000020, 0400000124, 0400000127, 0400000128, 0400000192, 0400003006 , 0400001001,0400001002
-PdL : 0000000028, 0400000124, 0400000127, 0400000128, 0400000201,0400001001,0400001002, 0400003006
+BRETAGNE : 0000000028, **0400000020**, 0400000124, 0400000127, 0400000128, **0400000192**, 0400003006 , 0400001001,0400001002
+PdL : 0000000028, 0400000124, 0400000127, 0400000128, **0400000201**,0400001001,0400001002, 0400003006
 
 Perimetre : Depuis 1995
 
@@ -57,3 +58,133 @@ Séries par entité géographique (site) :
 - Station en bon état (DCE)
 - Stations suivies
 - Stations évaluées (DCE)
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+library(config) # Utilisation d'un fichier de configuration, cf  https://db.rstudio.com/best-practices/managing-credentials/#stored-in-a-file-with-config
+library(tidyverse)
+library(DBI) # pour les connexions aux BDD
+library(RPostgreSQL) # driver postgres
+library(RMariaDB) # driver
+library(RMySQL)
+library(lubridate) # calcul sur les dates
+
+library(httr) #
+library(jsonlite)
+
+# Fonction pour traduire la réponse de l'API
+api_reponse <- function(request) {
+  
+case_when(request$status_code==200 ~ "OK, tous les résultats sont présents dans la réponse",
+          request$status_code==206 ~ "OK, il reste des résultats",
+          request$status_code==400 ~ "Requête incorrecte",
+            TRUE ~ "Autre réponse")
+}
+
+# Fonction pour requêter l'API Hub'Eau
+
+get_hubeau <- function(path, query) {
+  
+  response <- GET(url = path, query = query) %>% 
+  content(as = "text", encoding = "UTF-8") %>%
+  fromJSON(flatten = TRUE)
+  
+data = response$data # Le jeu de données est dans l'objet "data"
+
+if(response$count > query$size) { # Si la taille de page est plus petite que le nb de résultats, faire une boucle pour les pages suivantes
+  
+pages <- ceiling(response$count/query$size)
+
+# Affichage d'une barre de progression
+pb <- winProgressBar(title = "Récupération des données", min = 0,
+                     max = pages, width = 300)
+
+for(i in 2:pages){
+  
+  query$page <- i
+  
+  response_i <- GET(url = path, query = query) %>% 
+  content(as = "text", encoding = "UTF-8") %>%
+  fromJSON(flatten = TRUE)
+
+data <- rbind(data, response_i$data) # Concaténation des lignes récupérées
+
+setWinProgressBar(pb, i, title=paste( round(i/pages*100, 0), "% chargé")) # Avancement de la barre de progression
+
+} # Fin boucle for
+
+close(pb)
+
+} # Fin if
+
+return(data)
+  } # Fin get_hubeau
+```
+
+
+```{r connexion_bd}
+
+conf <- config::get("mysql_local")
+
+con_mysql_local <- dbConnect(odbc::odbc(),
+                             Driver=conf$driver,
+                             host = conf$host,
+                             UID = conf$uid,
+                             PWD = conf$pwd,
+                             port = conf$port,
+                             timeout = 10,
+                             database = "oeb_tbi",
+                             encoding = "latin1")
+
+dbListTables(con_mysql_local) # Lister les tables de la base
+```
+
+```{r qualitometres}
+# Recupération de la liste des piézomètres du réseau breton dans la base de données
+
+db_qualitometres <- tbl(con_mysql_local, "oeb_tbi_nitrate_nappe") # Lecture de la table des piezometres
+
+db_qualitometres %>% distinct(CdSiteSurv) %>%tally() #574 qualitometres
+
+liste_codes_bss <- db_qualitometres %>% distinct(CdSiteSurv) %>% collect() %>%
+  summarise(Code_national_BSS = str_flatten(CdSiteSurv, collapse = ",")) # Liste des piezometres pour la requete
+
+```
+
+
+
+```{r hubeau}
+
+# Récupération des infos sur les stations de mesure
+
+#liste_codes_bss <- c('03462X0036/P')
+
+# Liste des paramètres de la requête
+query_stations = list(
+  num_departement=params$num_departement,
+  format='json',
+  size=params$pagination
+  )
+
+# Requête des stations
+hubeau_stations <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/qualite_nappes/stations?", query = query_stations)
+
+# Récupération des chroniques
+
+# Liste des paramètres de la requête
+query_analyses = list(
+                 codes_reseau=params$codes_reseau,
+                 format = 'json',
+                 size = params$pagination,
+                 date_debut_mesure = params$date_debut,
+                 date_fin_mesure = as.Date(params$date_fin)-1)
+
+# Requête des analyses
+hubeau_analyses <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/qualite_nappes/analyses?", query=query_analyses)
+```
+
+```{r}
+hubeau_stations
+```
+
+
