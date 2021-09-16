@@ -1,7 +1,6 @@
 ---
 title: "Intégration des données des prélèvements en eaux brutes"
 params:
-  reseau_piezo: '0400000020'
   date_debut: 2019-01-01
   date_fin: 2020-01-01
   departements: '22,29,35,56,50,44,49,53'
