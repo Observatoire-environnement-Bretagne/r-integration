@@ -743,7 +743,7 @@ oeb_donnees_ceva %>%
   # Série de données la plus récente
   filter(substr(Periode,6,9) == '2019' & 
            # Serie des surfaces cumulées moyennes interannuelles pour les sites sableux
-        (Serie == 'Surface cumulée interannuelle (mai septembre - 3_inv)' & Type_Site == 'SABLEUX'
+        (Serie == 'Surface moyenne interannuelle (mai septembre - 3_inv)' & Type_Site == 'SABLEUX'
            # Serie des surfaces maximales moyennes interannuelles pour les sites sableux
          | Serie == 'Surface maximale interannuelle (mai septembre - 3_inv)' & Type_Site == 'VASIERES'
          ) # end OR
@@ -753,7 +753,7 @@ oeb_donnees_ceva %>%
   # Champs de la table de destination
   select(Lb_Site, Cd_Site, Coord_x_wgs84 = Coord_X_WGS84, Coord_y_wgs84 = Coord_Y_WGS84, Periode, Serie, resultat = Resultat, unite = Unite, Type_Site, Source, Mise_a_jour)%>%
   # Ecriture de la table CSV
-  write.table(paste0(params$chemin_destination,"/GEOB/oeb_eau_algues_vertes_carte.csv"), quote=FALSE, sep=';', row.names = FALSE)
+  write.table(paste0(params$chemin_destination,"/CARTO/oeb_eau_algues_vertes_carte.csv"), quote=FALSE, sep=';', row.names = FALSE)
 ```
 
 
