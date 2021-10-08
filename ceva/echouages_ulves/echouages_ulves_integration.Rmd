@@ -25,15 +25,18 @@ library("readxl") # Lecture de fichiers xlsx
 
 ```{r connexion bd Eau}
 
-conf <- config::get("mysql_local")
+# conf <- config::get("mysql_local")
+# 
+# con_mysql_local <- dbConnect(odbc::odbc(),
+#                              Driver=conf$driver,
+#                              host = conf$server,
+#                              UID = conf$uid,
+#                              PWD = conf$pwd,
+#                              database = "oeb_traitement_av",
+#                              encoding = "latin1")
 
-con_mysql_local <- dbConnect(odbc::odbc(),
-                             Driver=conf$driver,
-                             host = conf$server,
-                             UID = conf$uid,
-                             PWD = conf$pwd,
-                             database = "oeb_traitement_av",
-                             encoding = "latin1")
+con_mysql_oeb <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
+dbname = "eau_traitement_av")
 
 conf <- config::get("postgres_dev")
 
@@ -47,7 +50,7 @@ con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
                              encoding = "latin1")
 
   
-dbListTables(con_mysql_local) # Lister les tables de la base
+dbListTables(con_mysql_oeb) # Lister les tables de la base
 
 ```
 
@@ -333,7 +336,7 @@ data_sf_interannee <- data_sf_annee %>%
   ungroup() %>%
   union_all(data_sf_interannee_vaseux)
 
-data_sf_interannee
+data_sf_interannee %>% filter(Lb_Site == "MORIEUX")
 ```
 
 ```{r graphe_nbsites_interannuelles, fig.height=4, fig.width=14}
@@ -435,15 +438,15 @@ oeb_ceva_tbi <- serie_sf %>%
          Type_entite_geo_associe = Type_entit_geo_associee,
          PLAV)
 
-oeb_ceva_tbi
+oeb_ceva_tbi %>% filter(Cd_Site == "AV_014" & Serie == "Surface moyenne interannuelle (mai septembre - 3_inv)")
 ```
 
 ```{r chargement_bd_oeb_traitement_av, eval=FALSE, include=FALSE}
 
-dbWriteTable(con_mysql_local, "oeb_donnees_ceva_test2", oeb_donnees_ceva, overwrite=TRUE, append=FALSE,
+dbWriteTable(con_mysql_oeb, "oeb_donnees_ceva", oeb_donnees_ceva, overwrite=FALSE, append=TRUE,
                              encoding = "latin1")
 
-dbWriteTable(con_mysql_local, "oeb_ceva_tbi_test2", oeb_ceva_tbi, overwrite=TRUE, append=FALSE,
+dbWriteTable(con_mysql_oeb, "oeb_ceva_tbi", oeb_ceva_tbi, overwrite=FALSE, append=TRUE,
                              encoding = "latin1")
 ```
 

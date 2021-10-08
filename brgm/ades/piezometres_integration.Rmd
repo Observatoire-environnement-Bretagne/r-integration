@@ -3,8 +3,8 @@ title: "Integration des données piezometriques"
 output: html_notebook
 params:
   reseau_piezo: '0400000020'
-  date_debut: 2021-08-01
-  date_fin: 2021-09-01
+  date_debut: 2021-09-01
+  date_fin: 2021-10-01
   pagination: 5000
   path_dataviz: 'O:/04.DATAVISUALISATION/PIEZO_NIVEAU_NAPPES/BULLETIN PIEZO_SOURCE'
   
@@ -113,18 +113,21 @@ paste0("Données insérées : ",data%>%tally)
 
 conf <- config::get("mysql_local")
 
-con_mysql_local <- dbConnect(odbc::odbc(),
-                             Driver=conf$driver,
-                             host = conf$host,
-                             UID = conf$uid,
-                             PWD = conf$pwd,
-                             port = conf$port,
-                             timeout = 10,
-                             database = "oeb_piezo_variation_nappes",
-                             encoding = "latin1")
+# con_mysql_local <- dbConnect(odbc::odbc(),
+#                              Driver=conf$driver,
+#                              host = conf$host,
+#                              UID = conf$uid,
+#                              PWD = conf$pwd,
+#                              port = conf$port,
+#                              timeout = 10,
+#                              database = "oeb_piezo_variation_nappes",
+#                              encoding = "latin1")
 
-dbListTables(con_mysql_local) # Lister les tables de la base
+con_mysql_oeb <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
+dbname = "eau_piezo_variation_nappes")
 
+
+dbListTables(con_mysql_oeb) # Lister les tables de la base
 
 conf <- config::get("postgres_dev")
 
@@ -141,7 +144,7 @@ con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
 ```{r piezometres}
 # Recupération de la liste des piézomètres du réseau breton dans la base de données
 
-db_piezometres <- tbl(con_mysql_local, "oeb_tbi_variationnappe_pz") # Lecture de la table des piezometres
+db_piezometres <- tbl(con_mysql_oeb, "oeb_tbi_variationnappe_pz") # Lecture de la table des piezometres
 
 db_piezometres %>% tally() #56 piezometres
 
@@ -232,11 +235,12 @@ Dateintegration)
 # Insertion des données (le code n'est pas exécuté automatiquement)
 
 ```{r eval=FALSE, include=FALSE}
-db.insertion(con = con_mysql_local, table = "oeb_tbi_variationnappe_tmp", data = oeb_tbi_variationnappe_tmp)
+db.insertion(con = con_mysql_oeb, table = "oeb_tbi_variationnappe_tmp", data = oeb_tbi_variationnappe_tmp)
 
 # 2021-07-08 : 1453 lignes insérées pour juin 2021
 # 2021-08-16 : 1559 lignes insérées pour juillet 2021
 # 2021-09-07 : 1521 lignes insérées pour août 2021
+# 2021-10-04 : 1487 lignes insérées pour septembre 2021
 ```
 # Import des fichiers d'expertise du BRGM
 

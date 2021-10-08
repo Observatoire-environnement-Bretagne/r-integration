@@ -31,7 +31,7 @@ periode <- interval(debut_periode,fin_periode) # Période de suivi à croiser av
 
 db.insertion <- function(con,table,data) {
   
-  #con <- con_mysql_local
+  #con <- con_mysql_oeb
   #base<-"oeb_ars_cyano"
   #table<-"ars_fermeture"
   #data<-jours_interdiction
@@ -51,7 +51,7 @@ if (isTRUE(data %>% tally() > 0)) {
   # Horodate en commentaire
 mise_a_jour <- paste0(format.Date(Sys.Date(),"%d/%m/%Y"), " : Actualisation ",params$actualisation)
 
-dbGetQuery(con_mysql_local, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
+dbGetQuery(con, paste0("ALTER TABLE ",table," COMMENT = '",mise_a_jour,"';"))
 
 paste0("Données insérées : ",data%>%tally)
 
@@ -69,15 +69,18 @@ paste0("Données insérées : ",data%>%tally)
 
 ```{r connexion bd Eau}
 
-conf <- config::get("mysql_local")
+# conf <- config::get("mysql_local")
+# 
+# con_mysql_local <- dbConnect(odbc::odbc(),
+#                              Driver=conf$driver,
+#                              host = conf$server,
+#                              UID = conf$uid,
+#                              PWD = conf$pwd,
+#                              database = "oeb_ars_cyano",
+#                              encoding = "latin1")
 
-con_mysql_local <- dbConnect(odbc::odbc(),
-                             Driver=conf$driver,
-                             host = conf$server,
-                             UID = conf$uid,
-                             PWD = conf$pwd,
-                             database = "oeb_ars_cyano",
-                             encoding = "latin1")
+con_mysql_oeb <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
+dbname = "eau_ars_cyano")
 
 conf <- config::get("postgres_dev")
 
@@ -91,7 +94,7 @@ con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
                              encoding = "latin1")
 
   
-dbListTables(con_mysql_local) # Lister les tables de la base
+dbListTables(con_mysql_oeb) # Lister les tables de la base
 
 ```
 # Import du fichier d'échanges
@@ -115,7 +118,7 @@ if (length(fichier)>1) {
 - Fichier : [`r fichier`](`r paste0(params$chemin_source,'/',fichier)`)
 
 ```{r sites de surveillance}
-db_site <- tbl(con_mysql_local, "ars_cyano_site") # Récupération de la table des sites connus dans la BDD
+db_site <- tbl(con_mysql_oeb, "ars_cyano_site") # Récupération de la table des sites connus dans la BDD
 
 # Lecture de l'onglet "Liste des sites" dans le fichier d'import Excel
 data_sites <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
@@ -303,13 +306,13 @@ jours_interdiction <- data_interdictions %>%
 
 if(params$contexte == "production") {
   
-  db.insertion(con=con_mysql_local,table="ars_toxines",data=series_toxines)
+  db.insertion(con=con_mysql_oeb,table="ars_toxines",data=series_toxines)
   
-  db.insertion(con_mysql_local,"ars_denombrement",series_denombrements)
+  db.insertion(con_mysql_oeb,"ars_denombrement",series_denombrements)
   
-  db.insertion(con_mysql_local,"ars_fermeture",jours_interdiction)
+  db.insertion(con_mysql_oeb,"ars_fermeture",jours_interdiction)
   
-  dbWriteTable(con_mysql_local,"ars_site_observations", data_observations, append=TRUE, fileEncoding="System")
+  dbWriteTable(con_mysql_oeb,"ars_site_observations", data_observations, append=TRUE, fileEncoding="System")
   
   
   } else if (params$contexte == "developpement") {
@@ -342,7 +345,7 @@ if(params$contexte == "production") {
 
 ## SQL
 
-```{sql connection=con_mysql_local}
+```{sql connection=con_mysql_oeb}
 
 SELECT 'Fermetures', count(*), max(DatePrel), count(distinct CdPrel) FROM oeb_ars_cyano.ars_fermeture
 UNION

@@ -124,25 +124,28 @@ return(data)
 
 ```{r connexion_bd}
 
-conf <- config::get("mysql_local")
+# conf <- config::get("mysql_local")
+# 
+# con_mysql_local <- dbConnect(odbc::odbc(),
+#                              Driver=conf$driver,
+#                              host = conf$host,
+#                              UID = conf$uid,
+#                              PWD = conf$pwd,
+#                              port = conf$port,
+#                              timeout = 10,
+#                              database = "oeb_tbi",
+#                              encoding = "latin1")
 
-con_mysql_local <- dbConnect(odbc::odbc(),
-                             Driver=conf$driver,
-                             host = conf$host,
-                             UID = conf$uid,
-                             PWD = conf$pwd,
-                             port = conf$port,
-                             timeout = 10,
-                             database = "oeb_tbi",
-                             encoding = "latin1")
+con_mysql_oeb <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
+dbname = "eau_tbi")
 
-dbListTables(con_mysql_local) # Lister les tables de la base
+dbListTables(con_mysql_oeb) # Lister les tables de la base
 ```
 
 ```{r qualitometres}
 # Recupération de la liste des piézomètres du réseau breton dans la base de données
 
-db_qualitometres <- tbl(con_mysql_local, "oeb_tbi_nitrate_nappe") # Lecture de la table des piezometres
+db_qualitometres <- tbl(con_mysql_oeb, "oeb_tbi_nitrate_nappe") # Lecture de la table des piezometres
 
 db_qualitometres %>% distinct(CdSiteSurv) %>%tally() #574 qualitometres
 

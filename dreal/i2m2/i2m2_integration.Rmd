@@ -74,18 +74,19 @@ paste0("Données insérées : ",data%>%tally)
 ```
 
 ```{r connexion bd}
+# 
+# conf <- config::get("mysql_oeb")
+# 
+# con_oeb_calcul_i2m2 <- dbConnect(odbc::odbc(),
+#                              Driver=conf$driver,
+#                              host = conf$server,
+#                              UID = conf$uid,
+#                              PWD = conf$pwd,
+#                              database = "eau_calcul_i2m2",
+#                              encoding = "latin1")
 
-conf <- config::get("mysql_local")
-
-con_oeb_calcul_i2m2 <- dbConnect(odbc::odbc(),
-                             Driver=conf$driver,
-                             host = conf$server,
-                             UID = conf$uid,
-                             PWD = conf$pwd,
-                             database = "oeb_calcul_i2m2",
-                             encoding = "latin1")
-
-conf <- config::get("mysql_oeb")
+con_eau_calcul_i2m2 <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
+dbname = "eau_calcul_i2m2")
 
 con_referentiels <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
 dbname = "eau_referentiels")
@@ -386,30 +387,30 @@ oeb_i2m2_outildiag <- data_i2m2_outildiag  %>%
 ```
 
 ```{r ecriture_bdd, eval=FALSE, include=FALSE}
-dbBegin(con_oeb_calcul_i2m2) # Début de la transaction avec la BDD
+dbBegin(con_eau_calcul_i2m2) # Début de la transaction avec la BDD
 
-#dbGetQuery(con_oeb_calcul_i2m2, "TRUNCATE TABLE oeb_i2m2_test")
-#dbGetQuery(con_oeb_calcul_i2m2, paste0("DELETE from oeb_calcul_i2m2.oeb_i2m2 where right(Date,4) = ",params$actualisation))
-db.insertion(con_oeb_calcul_i2m2,"oeb_i2m2",oeb_i2m2)
+#dbGetQuery(con_eau_calcul_i2m2, "TRUNCATE TABLE oeb_i2m2_test")
+#dbGetQuery(con_eau_calcul_i2m2, paste0("DELETE from oeb_calcul_i2m2.oeb_i2m2 where right(Date,4) = ",params$actualisation))
+db.insertion(con_eau_calcul_i2m2,"oeb_i2m2",oeb_i2m2)
 
-#dbGetQuery(con_oeb_calcul_i2m2, "TRUNCATE TABLE oeb_i2m2_outilsdiag_test")
-db.insertion(con_oeb_calcul_i2m2,"oeb_i2m2_outilsdiag",oeb_i2m2_outildiag)
+#dbGetQuery(con_eau_calcul_i2m2, "TRUNCATE TABLE oeb_i2m2_outilsdiag_test")
+db.insertion(con_eau_calcul_i2m2,"oeb_i2m2_outilsdiag",oeb_i2m2_outildiag)
 
 
 ```
 
 
 ```{r tables_bdd}
-tbl(con_oeb_calcul_i2m2,"oeb_i2m2")%>%collect()%>%
+tbl(con_eau_calcul_i2m2,"oeb_i2m2")%>%collect()%>%
   mutate(Date = as.Date(Date,'%d/%m/%Y'))%>%summary()
 ```
 
 ```{r fermeture_connexion, eval=FALSE, include=FALSE}
 
-#dbCommit(con_oeb_calcul_i2m2)
-dbRollback(con_oeb_calcul_i2m2)
+#dbCommit(con_eau_calcul_i2m2)
+dbRollback(con_eau_calcul_i2m2)
 
-dbDisconnect(con_oeb_calcul_i2m2)
+dbDisconnect(con_eau_calcul_i2m2)
 
 
 ```
@@ -420,7 +421,7 @@ dbDisconnect(con_oeb_calcul_i2m2)
 
 # A remplacer par une vue
 
-tbl(con_oeb_calcul_i2m2,"oeb_i2m2_outilsdiag") %>% 
+tbl(con_eau_calcul_i2m2,"oeb_i2m2_outilsdiag") %>% 
   select(Code_entite_geographique,
            Lible_entite_geographique,
            CoordX_WGS84,
@@ -428,7 +429,7 @@ tbl(con_oeb_calcul_i2m2,"oeb_i2m2_outilsdiag") %>%
            Date,
            Serie,
            Resultat)%>%
-  union(tbl(con_oeb_calcul_i2m2,"oeb_i2m2"))%>%
+  union(tbl(con_eau_calcul_i2m2,"oeb_i2m2"))%>%
   filter(!is.na(CoordX_WGS84))%>%
   mutate(Source = "Traitement OEB, source Dreal, SEEE",
          Mise_a_jour = as.Date(now()))%>%
@@ -443,7 +444,7 @@ write.table(paste0(params$chemin_destination,"\\GIDE\\oeb_eau_i2m2_ce.csv"), quo
 
 # A remplacer par une vue
 
-tbl(con_oeb_calcul_i2m2,"oeb_i2m2") %>% 
+tbl(con_eau_calcul_i2m2,"oeb_i2m2") %>% 
   select(date_prel = Date,
          cdsite = Code_entite_geographique,
          lbsite = Lible_entite_geographique,
