@@ -1,0 +1,70 @@
+---
+title: "Intégration des données OFB/ASPE"
+output: html_notebook
+params:  
+  chemin_source: 'O:\01.BD_EAU\OFB\POISSONS\A_TRAITER\\'
+  fichier_source: 'tables_sauf_mei_2021_09_10_14_35_58.RData'
+  chemin_destination: 'O:\04.DATAVISUALISATION\INDICATEURS_BIOLOGIE\POISSONS\\'
+  actualisation: '2020'
+---
+
+```{r setup}
+
+
+library(config) # Utilisation d'un fichier de configuration, cf  https://db.rstudio.com/best-practices/managing-credentials/#stored-in-a-file-with-config
+library(tidyverse)
+library(DBI) # pour les connexions aux BDD
+library(RPostgres) # driver postgres
+library(RMariaDB) # driver
+
+library(lubridate) # calcul sur les dates
+
+library(plotly) # Graphiques interactifs
+library(leaflet) # Cartes interactives
+
+library(aspe) # Traitement de la base ASPE (https://github.com/PascalIrz/aspe) devtools::install_github("PascalIrz/aspe")
+```
+
+# Base ASPE OFB
+
+Chargement des données au format .Rdata dans l'environnement de travail
+
+```{r chargement_tables_ofb_rdata}
+load(paste0(params$chemin_source,params$fichier_source))
+```
+
+
+
+# Base eau_traitement_poissons OEB
+```{r connexions_bd}
+con_eau_traitement_poissons <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
+dbname = "eau_traitement_poissons")
+
+con_referentiels <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
+dbname = "eau_referentiels")
+
+conf <- config::get("postgres_dev")
+
+con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
+                          Driver       = conf$driver,
+                          servername   = conf$server,
+                          UID = conf$uid,
+                          PWD = conf$pwd,
+                          Port = conf$port,
+                          database = conf$database,
+                             encoding = "latin1")
+```
+
+
+```{r tables_traitement}
+tables_traitement <- dbListTables(con_eau_traitement_poissons)
+tables_traitement
+
+dbListFields(con_eau_traitement_poissons,tables_traitement[5])
+
+dbListFields(con_eau_traitement_poissons,tables_traitement[6])
+
+dbListFields(con_eau_traitement_poissons,tables_traitement[7])
+
+dbListFields(con_eau_traitement_poissons,tables_traitement[8])
+```
