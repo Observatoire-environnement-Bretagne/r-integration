@@ -48,7 +48,7 @@ ensure_multipolygons <- function(X) {
 
 sages <- ensure_multipolygons(sages)
 
-mapview::mapview(sages2)
+mapview::mapview(sages)
 
 # ======================================================================================================
 # Sélection des identifiants de la région
@@ -188,85 +188,4 @@ ma_liste <- list("peuplement" = peuplement_bzh,
                  "ipr" = ipr_bzh)
 
 openxlsx::write.xlsx(ma_liste, file = "processed_data/aspe_2021_10_20.xlsx",
-                     overwrite = T)
-
-
-
-
-
-
-
-
-
-
-
-
-
-load(file = "raw_data/tables_sauf_mei_2021_09_10_14_35_58.RData")
-
-# dataframe "passerelle" de mise en correspondance des identifiants de station, point, opération etc.
-passerelle <- mef_creer_passerelle()
-
-# identifiants des points
-pop_ids <- passerelle %>%
-  mef_ajouter_dept() %>% 
-  filter(dept %in% c("22", "29", "35", "56")) %>% 
-  pull(pop_id) %>% 
-  unique()
-
-# filtrage de la passerelle sur la région
-passerelle_bzh <- passerelle %>% 
-  filter(pop_id %in% pop_ids) %>% 
-  distinct()
-
-# stations
-# stations_bzh <- passerelle_bzh %>% 
-#   mef_ajouter_libelle() %>% 
-#   select(sta_id,
-#          pop_id,
-#          pop_libelle) %>% 
-#   distinct() %>% 
-#   left_join(y = station %>% 
-#               select(sta_id, sta_code_sandre)) %>% 
-#   left_join(y = point_prelevement %>% 
-#               select(pop_id, pop_code_sandre))
-
-# operations
-# operations_bzh <- stations_bzh %>% 
-#   left_join(passerelle_bzh) %>% 
-#   mef_ajouter_ope_date() %>% 
-#   select(sta_id,
-#          pop_id,
-#          ope_id,
-#          ope_date,
-#          annee) %>% 
-#   distinct()
-
-# captures
-peuplement <- passerelle_bzh %>% 
-  mef_ajouter_lots() %>% 
-  mef_ajouter_esp_code_alternatif() %>% 
-  mef_ajouter_ope_date() %>% 
-  left_join(y = passerelle_taxo) %>% 
-  group_by(across(c(-effectif))) %>% 
-    summarise(lop_effectif = sum(lop_effectif)) %>% 
-  ungroup() %>% 
-  select(Annee = annee,
-         Num_operation = ope_id,
-         date_peche = ope_date,
-         Code_station = sta_id,
-         Code_espece_onema = esp_code_alternatif,
-         Code_INPN = esp_code_taxref,
-         Effectif_peche = lop_effectif) %>% 
-  distinct() %>% 
-  
-
-# export en Excel si ça a un intérêt
-ma_liste <- list("liste_stations" = stations_bzh,
-                 "operations" = operations_49,
-                 "captures" = captures_49,
-                 "syntheses" = export_aspe_49,
-                 "taxonomie" = passerelle_taxo)
-
-openxlsx::write.xlsx(ma_liste, file = "processed_data/aspe_49.xlsx",
                      overwrite = T)
