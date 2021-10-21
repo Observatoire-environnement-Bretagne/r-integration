@@ -23,6 +23,7 @@ library(plotly) # Graphiques interactifs
 library(leaflet) # Cartes interactives
 
 library(aspe) # Traitement de la base ASPE (https://github.com/PascalIrz/aspe) devtools::install_github("PascalIrz/aspe")
+library(tod) # Traitement de la base ASPE (https://github.com/PascalIrz/tod) devtools::install_github("PascalIrz/tod")
 ```
 
 # Base ASPE OFB
@@ -31,6 +32,20 @@ Chargement des données au format .Rdata dans l'environnement de travail
 
 ```{r chargement_tables_ofb_rdata}
 load(paste0(params$chemin_source,params$fichier_source))
+```
+
+```{r table_operations}
+passerelle <- mef_creer_passerelle() 
+
+passerelle %>%
+  mef_ajouter_ope_date() %>%
+  mef_ajouter_abs() %>%
+  mef_ajouter_objectif() %>%
+  mef_ajouter_moyen_prospection() %>%
+  mef_ajouter_surf_calc() %>% 
+  mef_ajouter_libelle()
+
+names(passerelle)
 ```
 
 

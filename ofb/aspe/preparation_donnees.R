@@ -3,6 +3,9 @@ library(sf)
 library(mapview)
 library(aspe)
 library(tod)
+library(readxl)
+
+setwd("O:/02.TRAITEMENTS/traitement-r/ofb/aspe")
 
 # ======================================================================================================
 # Préparation d'un polygone de la région qui nous intéresse
@@ -88,6 +91,26 @@ passerelle <- mef_creer_passerelle() %>%
   left_join(y = passerelle_taxo %>% 
               select(esp_code_alternatif, esp_nom_latin, esp_code_taxref))
 
+# ======================================================================================================
+# Référentiels des types de cours d'eau et des abondances attendues
+# ======================================================================================================
+referentiel_classes_abondance_bzh <- read_excel("raw_data/CLASAB_BZH.xls",
+                         sheet = "CLASBRET_Inv2P", range = "B4:K27",
+                         col_types = c("text", "numeric", "skip",
+                                       "numeric", "skip", "numeric", "skip",
+                                       "numeric", "skip", "numeric"))%>%
+  setNames(c("Code_espece_onema","inf1","inf2","inf3","inf4","inf5"))
+
+referentiel_station_typologie_ce <- read.csv("raw_data/referentiel_station_typologie_ce.csv", sep = ";")%>%
+  setNames(c("Code_station", "Ref_typologie_CE"))%>%
+  # Les codes station SANDRE ont 8 caractères
+  mutate(Code_station = sprintf("%08d", Code_station))
+
+referentiel_espece_abondance_theorique <- read.csv("raw_data/referentiel_espece_abondance_theorique.csv", sep = ";")%>%
+  setNames(c("Code_espece_onema", "Ref_typologie_CE", "Classe_abondance_theorique"))%>%
+  mutate(Classe_abondance_theorique = ifelse(Classe_abondance_theorique == '0,5','P',Classe_abondance_theorique))
+
+
 # table peuplement
 # --------------------------
 provisoire <- passerelle %>% 
@@ -95,20 +118,33 @@ provisoire <- passerelle %>%
               select(sta_id, sta_code_sandre)) %>% 
   left_join(point_prelevement %>% 
               select(pop_id, pop_code_sandre)) %>% 
-  mutate(Code_station = ifelse(!is.na(sta_code_sandre), sta_code_sandre, pop_code_sandre)) # création d'un code point
+  #mutate(Code_station = ifelse(!is.na(sta_code_sandre), sta_code_sandre, pop_code_sandre)) # création d'un code point
+  mutate(Code_station = sta_code_sandre)
  
 peuplement_bzh <- provisoire %>% 
+ mutate(Code_station = as.character(sta_code_sandre))%>%
  select(Annee = annee,
          Num_operation = ope_id,
          date_peche = ope_date,
          Code_station,
+        sta_id,
          Code_espece_onema = esp_code_alternatif,
          Code_INPN = esp_code_taxref,
          Effectif_peche = lop_effectif) %>% 
   group_by(across(c(-Effectif_peche))) %>% 
-    summarise(Effectif_peche = sum(Effectif_peche)) %>% 
+  summarise(Effectif_peche = sum(Effectif_peche)) %>% 
   ungroup() %>% 
-  distinct()
+  distinct() %>%
+  # Jointure des référentiels pour obtenir une classe d'abondance et une classe d'abondance attendue
+  left_join(referentiel_classes_abondance_bzh, by="Code_espece_onema") %>%
+  mutate(Classe_abondance = case_when(Effectif_peche >= inf5 ~ '5',
+                                      Effectif_peche < inf5 & Effectif_peche >= inf4 ~ '4',
+                                      Effectif_peche < inf4 & Effectif_peche >= inf3 ~ '3',
+                                      Effectif_peche < inf3 & Effectif_peche >= inf2 ~ '2',
+                                      Effectif_peche < inf2 & Effectif_peche >= inf1 ~ '1',
+                                      Effectif_peche < inf1 & Effectif_peche > 0 ~ 'P'))%>%
+  left_join(referentiel_station_typologie_ce, by="Code_station")%>%
+  left_join(referentiel_espece_abondance_theorique, by=c("Code_espece_onema", "Ref_typologie_CE"))
 
 
 # table operation
@@ -140,6 +176,7 @@ operation_bzh <- operation_bzh %>%
   group_by(across(-pas_numero)) %>% 
     summarise(Nombre_passage = max(pas_numero)) %>% 
   ungroup() %>% 
+  mutate(Code_station = as.character(Code_station))%>%
   select(Annee = annee,
          Num_operation = ope_id,
          date_peche = ope_date,
@@ -153,7 +190,9 @@ operation_bzh <- operation_bzh %>%
          Mode_prospection = mop_libelle,
          Nombre_passage,
          Surface_prospectee = ope_surface_calculee) %>% 
-  distinct()
+  distinct()%>%
+  left_join(referentiel_station_typologie_ce, by="Code_station")
+  
 
 
 # table IPR
@@ -172,11 +211,17 @@ ipr_bzh <- provisoire %>%
 
 
 ipr_bzh <- ipr_bzh %>% 
+  # Attribution des classes IPR
+  # TODO rattacher les classes de qualité IPR https://www.legifrance.gouv.fr/jorf/article_jo/JORFARTI000037347782 tableau 34
   mutate(classe_metrique = cut(valeur_metrique,
                                breaks = c(-99, 7, 16, 25, 36, 1e6) / 7,
-                               labels = c("Excellent", "Bon", "Médiocre", "Mauvais", "Très mauvais")))
-
-
+                               labels = c("Excellent", "Bon", "Médiocre", "Mauvais", "Très mauvais")))%>%
+  select(Annee = annee,
+         Code_station,
+         note_IPR = ipr,
+         type_metrique,
+         valeur_metrique,
+         classe_metrique)
 
 write.csv2(peuplement_bzh, file = "processed_data/peuplement.csv")
 write.csv2(operation_bzh, file = "processed_data/operation.csv")
