@@ -118,16 +118,15 @@ provisoire <- passerelle %>%
               select(sta_id, sta_code_sandre)) %>% 
   left_join(point_prelevement %>% 
               select(pop_id, pop_code_sandre)) %>% 
+  mutate(Code_station = as.character(sta_code_sandre))
   #mutate(Code_station = ifelse(!is.na(sta_code_sandre), sta_code_sandre, pop_code_sandre)) # création d'un code point
-  mutate(Code_station = sta_code_sandre)
+
  
-peuplement_bzh <- provisoire %>% 
- mutate(Code_station = as.character(sta_code_sandre))%>%
+peuplement_bzh <- provisoire %>%
  select(Annee = annee,
          Num_operation = ope_id,
          date_peche = ope_date,
          Code_station,
-        sta_id,
          Code_espece_onema = esp_code_alternatif,
          Code_INPN = esp_code_taxref,
          Effectif_peche = lop_effectif) %>% 
@@ -142,9 +141,11 @@ peuplement_bzh <- provisoire %>%
                                       Effectif_peche < inf4 & Effectif_peche >= inf3 ~ '3',
                                       Effectif_peche < inf3 & Effectif_peche >= inf2 ~ '2',
                                       Effectif_peche < inf2 & Effectif_peche >= inf1 ~ '1',
-                                      Effectif_peche < inf1 & Effectif_peche > 0 ~ 'P'))%>%
+                                      # La classe d'abondance 'P' n'est pas gérée dans le job Talend --> vide
+                                      Effectif_peche < inf1 & Effectif_peche > 0 ~ ''))%>%
   left_join(referentiel_station_typologie_ce, by="Code_station")%>%
-  left_join(referentiel_espece_abondance_theorique, by=c("Code_espece_onema", "Ref_typologie_CE"))
+  left_join(referentiel_espece_abondance_theorique, by=c("Code_espece_onema", "Ref_typologie_CE"))%>%
+  select(Annee, Num_operation,date_peche, Code_station, Code_espece_onema, Code_INPN,Effectif_peche,Classe_abondance,Classe_abondance_theorique)
 
 
 # table operation
@@ -176,10 +177,11 @@ operation_bzh <- operation_bzh %>%
   group_by(across(-pas_numero)) %>% 
     summarise(Nombre_passage = max(pas_numero)) %>% 
   ungroup() %>% 
-  mutate(Code_station = as.character(Code_station))%>%
+  mutate(date_peche = format(ope_date,"%d/%m/%Y %H:%m"))%>%
+  left_join(referentiel_station_typologie_ce, by="Code_station")%>%
   select(Annee = annee,
          Num_operation = ope_id,
-         date_peche = ope_date,
+         date_peche,
          Code_station,
          Lb_station = pop_libelle,
          Coord_X = X,
@@ -189,9 +191,9 @@ operation_bzh <- operation_bzh %>%
          Methode_prospection = pro_libelle,
          Mode_prospection = mop_libelle,
          Nombre_passage,
-         Surface_prospectee = ope_surface_calculee) %>% 
-  distinct()%>%
-  left_join(referentiel_station_typologie_ce, by="Code_station")
+         Surface_prospectee = ope_surface_calculee,
+         Ref_typologie_CE) %>% 
+  distinct()
   
 
 
@@ -214,18 +216,24 @@ ipr_bzh <- ipr_bzh %>%
   # Attribution des classes IPR
   # TODO rattacher les classes de qualité IPR https://www.legifrance.gouv.fr/jorf/article_jo/JORFARTI000037347782 tableau 34
   mutate(classe_metrique = cut(valeur_metrique,
-                               breaks = c(-99, 7, 16, 25, 36, 1e6) / 7,
-                               labels = c("Excellent", "Bon", "Médiocre", "Mauvais", "Très mauvais")))%>%
+                               # La limite supérieure de la classe "Bon" passe de 7 à 5
+                               breaks = c(-99, 5, 16, 25, 36, 1e6) / 7,
+                               labels = c("Très bon", "Bon", "Médiocre", "Mauvais", "Très mauvais"))) %>%
+  left_join(classe_ipr, by=character()) %>%
+  filter(ipr >= cli_borne_inf, ipr < cli_borne_sup, is.na(cli_altitude_max)) %>%
+  mutate(cli_libelle = case_when('Excellent' ~ 'Très bon',
+                                 TRUE ~ cli_libelle)) %>%
   select(Annee = annee,
          Code_station,
          note_IPR = ipr,
+         classe_IPR = cli_libelle,
          type_metrique,
          valeur_metrique,
          classe_metrique)
 
-write.csv2(peuplement_bzh, file = "processed_data/peuplement.csv")
-write.csv2(operation_bzh, file = "processed_data/operation.csv")
-write.csv2(ipr_bzh, file = "processed_data/ipr.csv")
+write.table(peuplement_bzh, file = "processed_data/peuplement.csv", na = "", sep=";", row.names = FALSE, dec = ".", fileEncoding = "UTF-8")
+write.table(operation_bzh, file = "processed_data/operation.csv", na = "", sep=";", row.names = FALSE, dec = ".", fileEncoding = "UTF-8")
+write.table(ipr_bzh, file = "processed_data/ipr.csv", na = "", sep=";", row.names = FALSE, dec = ".", fileEncoding = "UTF-8")
 
 # export en Excel si ça a un intérêt
 ma_liste <- list("peuplement" = peuplement_bzh,
