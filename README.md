@@ -13,3 +13,5 @@ Scripts d'intégration R organisés par source de données
     - i2m2_integration.rmd : Intégration de l'indice i2m2 à partir des sorties de l'outil SEEE
 - ofb/ : Office Français pour la Biodiversité
   - aspe/ : Données de la base ASPE des pêches électriques OFB 
+  - naiades/ : Données de la base OFB Naïades sur la qualité des eaux
+    - naiades_hydrobiologie_integration.rmd : Intégration des données de qualité biologique des eaux de surface via l'API Hub'Eau
