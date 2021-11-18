@@ -264,41 +264,32 @@ operation_bzh <- operation_bzh %>%
 # --------------------------
 
 ipr_bzh <- provisoire %>%
-  select(annee, Code_station, ope_id) %>%
-  distinct() %>%
-  mef_ajouter_ipr() %>%
-  mef_ajouter_metriques() %>%
-  filter(!is.na(ipr)) %>%
-  select(-(cli_id:dti_observe)) %>%
+  select(annee, Code_station, ope_id) %>% 
+  distinct() %>% 
+  mef_ajouter_ipr() %>% 
+  mef_ajouter_metriques() %>% 
+  filter(!is.na(ipr)) %>% 
+  select(-(cli_id:dti_observe)) %>% 
   pivot_longer(cols = ner:dti,
                names_to = "type_metrique",
-               values_to = "valeur_metrique")
-
-
-ipr_bzh <- ipr_bzh %>%
+               values_to = "valeur_metrique") %>% 
   # Attribution des classes IPR
   # TODO rattacher les classes de qualité IPR https://www.legifrance.gouv.fr/jorf/article_jo/JORFARTI000037347782 tableau 34
-  mutate(classe_metrique = cut(
-    valeur_metrique,
-    # La limite supérieure de la classe "Bon" passe de 7 à 5
-    breaks = c(-99, 5, 16, 25, 36, 1e6) / 7,
-    labels = c("Très bon", "Bon", "Médiocre", "Mauvais", "Très mauvais")
-  )) %>%
-  left_join(classe_ipr, by = character()) %>%
-  filter(ipr >= cli_borne_inf,
-         ipr < cli_borne_sup,
-         is.na(cli_altitude_max)) %>%
-  mutate(cli_libelle = case_when('Excellent' ~ 'Très bon',
-                                 TRUE ~ cli_libelle)) %>%
-  select(
-    Annee = annee,
-    Code_station,
-    note_IPR = ipr,
-    classe_IPR = cli_libelle,
-    type_metrique,
-    valeur_metrique,
-    classe_metrique
-  )
+  mutate(classe_metrique = cut(valeur_metrique,
+                               # La limite supérieure de la classe "Bon" passe de 7 à 5
+                               breaks = c(-99, 5, 16, 25, 36, 1e6) / 7,
+                               labels = c("Très bon", "Bon", "Médiocre", "Mauvais", "Très mauvais"))) %>%
+  left_join(classe_ipr, by=character()) %>%
+  filter(ipr > cli_borne_inf, ipr <= cli_borne_sup, is.na(cli_altitude_max)) %>%
+  mutate(cli_libelle = case_when(cli_libelle == 'Excellent' ~ 'Très bon',
+                                 TRUE ~ as.character(cli_libelle))) %>%
+  select(Annee = annee,
+         Code_station,
+         note_IPR = ipr,
+         classe_IPR = cli_libelle,
+         type_metrique,
+         valeur_metrique,
+         classe_metrique)
 
 write.table(
   peuplement_bzh,
