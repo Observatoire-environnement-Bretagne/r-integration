@@ -4,8 +4,8 @@ output: html_notebook
 params:
   api_sites: 'https://hubeau.eaufrance.fr/api/vbeta/hydrobio/stations_hydrobio?'
   api_resultats: 'https://hubeau.eaufrance.fr/api/vbeta/hydrobio/indices?'
-  num_departement: '22,29,35,56,50,44,49,53'  #'22,29,35,56,50,44,49,53'
-  codes_parametres: '7036,5910,1022,5856,2928,6959,6951,6955,1000,2527'
+  num_departement: '22,29,35,56,50,44,49,53'  # 22,29,35,56,50,44,49,53
+  codes_parametres: '7036,5910,1022,5856,2928,6959,6951,6955,1000,2527' # 7036,5910,1022,5856,2928,6959,6951,6955,1000,2527
   date_debut: 2017-01-01
   date_fin: 2019-12-31
   pagination: 5000
@@ -166,9 +166,10 @@ sites <- st_as_sf(hubeau_sites, coords = c("coordonnee_x", "coordonnee_y"),
 
 # Récupération des résultats d'indices biologiques
 
-# Liste des paramètres de la requête
+# Liste des paramètres de la requête (lot 1 de départements)
 query_resultats = list(
-                 code_departement = params$num_departement,
+                 #code_departement = params$num_departement,
+                 code_departement = "29,22,35",
                  code_indice = params$codes_parametres,
                  #les paramètres date_debut et date_fin créent un bug dans l'API https://github.com/BRGM/hubeau/issues/81
                  #date_debut_prelevement = params$date_debut,
@@ -179,26 +180,30 @@ query_resultats = list(
 # Requête des chroniques
 hubeau_resultats <- get_hubeau(path = params$api_resultats, query=query_resultats)
 
+# Liste des paramètres de la requête (lot 2 de départements)
+query_resultats = list(
+                 #code_departement = params$num_departement,
+                 code_departement = "56,50,44,49,53",
+                 code_indice = params$codes_parametres,
+                 #les paramètres date_debut et date_fin créent un bug dans l'API https://github.com/BRGM/hubeau/issues/81
+                 #date_debut_prelevement = params$date_debut,
+                 #date_fin_prelevement = params$date_fin,
+                 size = params$pagination,
+                 format = 'json')
+
+# Requête des chroniques
+hubeau_resultats <- get_hubeau(path = params$api_resultats, query=query_resultats)%>%union(hubeau_resultats)
+
 # Conversion au format géographique
 resultats <- st_as_sf(hubeau_resultats, coords = c("coordonnee_x", "coordonnee_y"), 
     crs = 2154, agr = "constant")
 ```
 
-```{r sites_rcs}
-sites_rcs <- sites_sages %>%
-  # rowwise pour préciser que les opérations se font pour chaque ligne
-  rowwise()%>%
-  # Le code 0000000052 (RCS) est dans la liste des codes_réseaux
-  mutate(inclus_rcs = '0000000052' %in% unlist(codes_reseaux))%>%
-  select(code_station_hydrobio, inclus_rcs)
-```
-
+# Import des référentiels géographiques
 
 ```{r couche_sages}
-# couche des SAGEs
-wfs <- "https://geobretagne.fr/geoserver/dreal_b/sage_dreal/wfs?SERVICE=WFS&REQUEST=GetCapabilities" #data
-
-sages <- st_read(wfs)
+# couche des SAGEs bretons depuis Geobretagne
+sages <- st_read("https://geobretagne.fr/geoserver/dreal_b/sage_dreal/wfs?SERVICE=WFS&REQUEST=GetCapabilities")
 
 # pb pas moyen de manipuler cet objet => solution sur
 # https://gis.stackexchange.com/questions/389814/r-st-centroid-geos-error-unknown-wkb-type-12/389854#389854
@@ -212,7 +217,14 @@ ensure_multipolygons <- function(X) {
 }
 
 sages <- ensure_multipolygons(sages)
+
+# couche des Hydroécorégions de niveau 2
+
+her2 <- st_read("https://services.sandre.eaufrance.fr/geo/mdo?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&typename=Hydroecoregion2")%>%
+  st_transform(2154)
 ```
+# Sélection des sites et des résultats sur les territoires des SAGE bretons
+
 ```{r selection sur les territoires des SAGEs}
 
 sites_sages <- sites %>% 
@@ -221,10 +233,21 @@ sites_sages <- sites %>%
 
 resultats_sages <- resultats %>% 
   st_join(sages) %>% 
-  filter(!is.na(cd_sage))
+  filter(!is.na(cd_sage)) %>% 
+  st_join(her2)
 
 ```
 
+## Les sites font-ils partie du réseau RCS ?
+
+```{r sites_rcs}
+sites_rcs <- sites_sages %>%
+  # rowwise pour préciser que les opérations se font pour chaque ligne
+  rowwise()%>%
+  # Le code 0000000052 (RCS) est dans la liste des codes_réseaux
+  mutate(inclus_rcs = '0000000052' %in% unlist(codes_reseaux))%>%
+  select(code_station_hydrobio, inclus_rcs)
+```
 
 ```{r carte_sites}
 sites_sages %>%
@@ -307,16 +330,6 @@ sf::dbWriteTable(conn = con_postgresql_dev, name = Id(schema = "eau_structure",t
 ## Import de la table de correspondance site / EGA
 
 ```{r import_eau_correspondance_site_ega}
-eau_correspondance_site_ega <- tbl(con_referentiels, "eau_correspondance_site_ega")%>%
-  select(CdSite,CdEGA,TypeEGA)%>%
-  inner_join(select(tbl(con_referentiels, "eau_referentiel_ega"),CdEGA,TypeEGA,LbEGA), by=c("CdEGA","TypeEGA"))%>%
-  inner_join(select(tbl(con_referentiels, "eau_referentiel_site"),CdSite,LbSite,Coord_X_wgs84,Coord_Y_wgs84), by=c("CdSite"))%>%
-  mutate(TypeSite = 'SITE')
-
-eau_correspondance_site_ega
-```
-
-```{r import_eau_correspondance_site_ega}
 correspondance_site_ega <- tbl(con_postgresql_dev, dbplyr::in_schema("eau_referentiel","geo_correspondance_site_ega"))%>%
   mutate(typesite = 'SITE')
 
@@ -339,7 +352,8 @@ parametres
 classes_qualite <- tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","join_parametre_classe"))%>%
   left_join(tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","classe")), by="classe_id")%>%
   collect()%>%
-  filter(parametre_id %in% parametres$parametre_id)
+  filter(parametre_id %in% parametres$parametre_id,
+         valide == 1)
 
 classes_qualite
 ```
@@ -361,7 +375,8 @@ table_indices <- resultats_sages %>%
   mutate(unite_code = case_when(unite_indice == "Unité inconnue" ~ '0',
                                   unite_indice == "n" ~ '214',
                                   unite_indice == "‰ vs SMOW" ~ '32',
-                                  TRUE ~ unite_indice)) %>%
+                                  TRUE ~ unite_indice),
+         resultat_indice = ifelse(resultat_indice == 999, NA, resultat_indice)) %>%
   # tables des unités
   left_join(tbl(con_postgresql_dev, dbplyr::in_schema("eau_referentiel","unite")), by=c("unite_code" = "code"), copy=TRUE, suffix = c("", ".unite"))%>%
   # tables des sites
@@ -398,11 +413,13 @@ table_indices %>% distinct(code_indice)
 table_indices_classes <- table_indices %>% 
   left_join(classes_qualite, by = c("parametre_id"), copy = TRUE, suffix=c("",".classe")) %>%
   filter(resultat_indice < borne_sup_exclue & resultat_indice >= borne_inf_inclue)
+
+table_indices_classes
 ```
 
 # Exploration des données
 
-```{r fig.height=8, fig.width=16}
+```{r graphe_indices, fig.height=8, fig.width=16}
 table_indices_classes %>%
   group_by(year(date_prelevement), libelle_support, libelle_indice) %>%
   summarise(Nb_resultats = n(),
@@ -411,6 +428,16 @@ table_indices_classes %>%
            geom_bar(stat="identity")+
   facet_grid(libelle_support~.)
   
+```
+
+```{r graphe_indices_classes, fig.height=8, fig.width=16}
+table_indices_classes %>%
+  arrange(code)%>%
+  ggplot(aes(x = code, y=resultat_indice, fill = code))+
+           geom_boxplot()+
+  facet_wrap(~libelle_indice, scales = "free")
+  
+table_indices_classes
 ```
 
 
@@ -464,7 +491,7 @@ analyse_bio_esu <- table_indices %>%
   left_join(select(tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","date")), date_id, date_du_jour), by=c("date_prelevement" = "date_du_jour"), copy=TRUE)%>%
   left_join(select(tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","support")), support_id, code), by=c("code_support" = "code"), copy=TRUE)%>%
   left_join(select(tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","remarque")), remarque_id, code), by=c("code_qualification" = "code"), copy=TRUE)%>%
-  mutate(prelevement_code = paste(code_station_hydrobio,date_id,code_indice),
+  mutate(prelevement_code = paste0(code_station_hydrobio,date_id),
          rdd_id = 0,
          milieu_id = 3,
          fraction_id = 22,
@@ -484,6 +511,8 @@ analyse_bio_esu <- table_indices %>%
          limite_quantification,
          source,
          maj)
+
+analyse_bio_esu
 ```
 
 ### Sélection des nouvelles lignes à insérer
@@ -497,6 +526,8 @@ insert_analyse_bio_esu <- analyse_bio_esu
 ### Insertion des nouvelles lignes
 
 ```{r insert resultats_inconnus, eval=FALSE, include=FALSE}
+dbExecute(con_postgresql_dev, "TRUNCATE TABLE eau_structure.analyse_bio_esu")
+
 dbAppendTable(conn = con_postgresql_dev, name = Id(schema = "eau_structure",table = "analyse_bio_esu"), value = insert_analyse_bio_esu, fileEncoding="latin1")
 ```
 
@@ -570,8 +601,9 @@ oeb_eau_qualite_biologique_ce
 ```{r table insert_oeb_eau_qualite_biologique_ce}
 
 insert_oeb_eau_qualite_biologique_ce <- oeb_eau_qualite_biologique_ce %>% 
+  ungroup() %>%
   # Retirer les lignes des résultats déjà existants dans la table
-  anti_join(tbl(con_eau_tbi,"oeb_eau_qualite_biologique_ce_new", by=c("Type_entitite_geographique", "Code_entitite_geographique", "Type_entitite_geographique_associee", "Code_entitite_geographique_associee", "Periode", "Serie")), copy = TRUE)%>%
+  anti_join(tbl(con_eau_tbi,"oeb_eau_qualite_biologique_ce", by=c("Type_entitite_geographique", "Code_entitite_geographique", "Type_entitite_geographique_associee", "Code_entitite_geographique_associee", "Periode", "Serie")), copy = TRUE)%>%
   # Retirer les stations hydro sans EGA identifiée
   filter(!is.na(Type_entitite_geographique))%>%
   # Retirer les lignes avec une valeur NA
@@ -582,6 +614,86 @@ insert_oeb_eau_qualite_biologique_ce
 
 ### Insertion des nouvelles lignes
 
-```{r insert resultats_inconnus, eval=FALSE, include=FALSE}
-dbAppendTable(conn = con_eau_tbi, name = "oeb_eau_qualite_biologique_ce_new", value = insert_oeb_eau_qualite_biologique_ce, fileEncoding="latin1")
+```{r insert oeb_eau_qualite_biologique_ce, eval=FALSE, include=FALSE}
+dbExecute(con_eau_tbi, "TRUNCATE TABLE oeb_eau_qualite_biologique_ce")
+
+dbAppendTable(conn = con_eau_tbi, name = "oeb_eau_qualite_biologique_ce", value = insert_oeb_eau_qualite_biologique_ce, fileEncoding="latin1")
+```
+
+### Export pour le GIDE
+
+```{r export oeb_eau_qualite_biologique_ce}
+# Depuis la base de données
+#tbl(con_eau_tbi, "oeb_eau_qualite_biologique_ce_new")%>%
+# ou depuis la table en mémoire
+oeb_eau_qualite_biologique_ce %>%  
+write.table(file = paste0(params$path_dataviz,"\\GIDE\\","oeb_eau_qualite_biologique_ce.csv"), quote = TRUE, sep = ";",
+            eol = "\n", na = "", dec = ",",
+            fileEncoding = "UTF-8")
+```
+
+### Export pour GEOB
+
+```{r oeb_eau_qualite_geob}
+oeb_eau_qualite_geob <- table_series_indices  %>%
+  ungroup()%>%
+  left_join(select(sites_sages,code_station_hydrobio,libelle_station_hydrobio), by="code_station_hydrobio")  %>%
+  mutate(Code_entitite_geographique = code_station_hydrobio,
+         Libelle_entitite_geographique = libelle_station_hydrobio,
+         CoordX_WGS84 = longitude_wgs84,
+         CoordY_WGS84 = latitude_wgs84,
+         Serie,
+         unite = symbole,
+         Type_entitite_geographique = 'SITE',
+         Source = 'OFB/NAIADES',
+         Mise_a_jour = format(Sys.Date(),"%Y-%m-%d")) %>%
+  select(Type_entitite_geographique,
+         Code_entitite_geographique,
+         Libelle_entitite_geographique,
+         CoordX_WGS84,
+         CoordY_WGS84,
+         Serie,
+         unite,
+         Source,
+         Mise_a_jour,
+         Annee,
+         Resultat) %>%
+  pivot_wider(values_from = Resultat, names_from = Annee, names_sort=TRUE)
+```
+
+
+```{r export oeb_eau_qualite_biologique_globale}
+
+oeb_eau_qualite_geob  %>%
+  filter(Serie == 'Classe - Qualité biologique Globale')  %>%
+write.table(file = paste0(params$path_dataviz,"\\GEOB\\","oeb_eau_qualite_biologique_globale.csv"), quote = TRUE, sep = ";",
+            eol = "\n", na = "", dec = ",",
+            fileEncoding = "UTF-8")
+```
+
+```{r export oeb_eau_qualite_diatomees}
+
+oeb_eau_qualite_geob %>%
+  filter(Serie == 'Classe - Diatomées benthiques') %>%
+write.table(file = paste0(params$path_dataviz,"\\GEOB\\","oeb_eau_qualite_diatomees.csv"), quote = TRUE, sep = ";",
+            eol = "\n", na = "", dec = ",",
+            fileEncoding = "UTF-8")
+```
+
+```{r export oeb_eau_qualite_macroinvertebres}
+
+oeb_eau_qualite_geob %>%
+  filter(Serie == 'Classe - Macroinvertébrés aquatiques') %>%
+write.table(file = paste0(params$path_dataviz,"\\GEOB\\","oeb_eau_qualite_macroinvertebres.csv"), quote = TRUE, sep = ";",
+            eol = "\n", na = "", dec = ",",
+            fileEncoding = "UTF-8")
+```
+
+```{r export oeb_eau_qualite_macrophytes}
+
+oeb_eau_qualite_geob %>%
+  filter(Serie == 'Classe - Macrophytes') %>%
+write.table(file = paste0(params$path_dataviz,"\\GEOB\\","oeb_eau_qualite_macrophytes.csv"), quote = TRUE, sep = ";",
+            eol = "\n", na = "", dec = ",",
+            fileEncoding = "UTF-8")
 ```
