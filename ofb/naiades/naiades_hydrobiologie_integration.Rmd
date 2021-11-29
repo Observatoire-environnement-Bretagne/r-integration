@@ -1,20 +1,21 @@
 ---
 title: "Integration des données hydrobiologiques"
-output: html_notebook
+output: html_document
 params:
-  api_sites: 'https://hubeau.eaufrance.fr/api/vbeta/hydrobio/stations_hydrobio?'
-  api_resultats: 'https://hubeau.eaufrance.fr/api/vbeta/hydrobio/indices?'
-  num_departement: '22,29,35,56,50,44,49,53'  # 22,29,35,56,50,44,49,53
-  codes_parametres: '7036,5910,1022,5856,2928,6959,6951,6955,1000,2527' # 7036,5910,1022,5856,2928,6959,6951,6955,1000,2527
-  date_debut: 2017-01-01
-  date_fin: 2019-12-31
+  api_sites: https://hubeau.eaufrance.fr/api/vbeta/hydrobio/stations_hydrobio?
+  api_resultats: https://hubeau.eaufrance.fr/api/vbeta/hydrobio/indices?
+  num_departement: '22,29,35,56,50,44,49,53'
+  codes_parametres: '7036,5910,1022,5856,2928,6959,6951,6955,1000,2527'
+  date_debut: '2017-01-01'
+  date_fin: '2019-12-31'
   pagination: 5000
-  path_dataviz: 'O:\04.DATAVISUALISATION\INDICATEURS_BIOLOGIE\DCE_ETAT_BIOLOGIQUE'
-  
+  path_dataviz: O:\04.DATAVISUALISATION\INDICATEURS_BIOLOGIE\DCE_ETAT_BIOLOGIQUE
 ---
 
 ```{r setup}
 knitr::opts_chunk$set(echo = TRUE)
+
+# Packages utilisés
 library(config) # Utilisation d'un fichier de configuration, cf  https://db.rstudio.com/best-practices/managing-credentials/#stored-in-a-file-with-config
 library(tidyverse)
 library(DBI) # pour les connexions aux BDD
@@ -28,19 +29,10 @@ library(jsonlite) # Gestion format json
 
 library("readxl") # Lecture de fichiers xlsx
 
-library(sf)
-library(mapview)
+library(sf) # Traitement de données géoréférencées
+library(mapview) # Affichage de données géoréférencées
 library(plotly) # Graphiques interactifs
 library(leaflet) # Cartes interactives
-
-# Fonction pour traduire la réponse de l'API
-api_reponse <- function(request) {
-  
-case_when(request$status_code==200 ~ "OK, tous les résultats sont présents dans la réponse",
-          request$status_code==206 ~ "OK, il reste des résultats",
-          request$status_code==400 ~ "Requête incorrecte",
-            TRUE ~ "Autre réponse")
-}
 
 # Fonction pour requêter l'API Hub'Eau
 
@@ -116,23 +108,19 @@ paste0("Données insérées : ",data%>%tally)
 } # fin db.insertion
 ```
 
+# Connexion aux bases de données pour l'intégration des données importées
 
 ```{r connexion_bd}
 
-# Base Mariadb OEB
+# Base Mariadb OEB - eau_tbi
 con_eau_tbi <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
 dbname = "eau_tbi")
 
-# Version localhost
-con_oeb_tbi <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_local",
-dbname = "oeb_tbi")
-
-
+# Base MariaDB OEB - référentiels
 con_referentiels <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
 dbname = "eau_referentiels")
 
-
-dbListTables(con_eau_tbi) # Lister les tables de la base
+# Base Postgres (développement)
 
 conf <- config::get("postgres_dev")
 
@@ -145,6 +133,9 @@ con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
                           database = 'eau',
                              encoding = "latin1")
 ```
+# Collecte des données de la base Naïades à partir de l'API Hydrobiologie du portail Hub'eau
+
+**Documentation de l'API :** https://hubeau.eaufrance.fr/page/api-hydrobiologie
 
 ```{r hubeau}
 
@@ -198,8 +189,16 @@ hubeau_resultats <- get_hubeau(path = params$api_resultats, query=query_resultat
 resultats <- st_as_sf(hubeau_resultats, coords = c("coordonnee_x", "coordonnee_y"), 
     crs = 2154, agr = "constant")
 ```
+Les stations de mesure et les chroniques d'analyses sont récupérées sur les départements `r params$num_departement` sur la période , via la fonction *get_hubeau(path, query)* définie ci-dessus.
+
+- path : adresse de l'API
+- query : liste des paramètres de requête avec leurs valeurs (code_)
+
+Les départements séparés en deux lots pour respecter les contraintes de nb de lignes totales récupérées par requête.
 
 # Import des référentiels géographiques
+
+Les polygones des territoires de SAGE bretons sont récupérées depuis le flux WFS de la DREAL Bretagne, ils correspondent au périmètre géographique des données à bancariser.
 
 ```{r couche_sages}
 # couche des SAGEs bretons depuis Geobretagne
@@ -225,6 +224,8 @@ her2 <- st_read("https://services.sandre.eaufrance.fr/geo/mdo?SERVICE=WFS&VERSIO
 ```
 # Sélection des sites et des résultats sur les territoires des SAGE bretons
 
+Les sites et résultats téléchargés sont sélectionnés sur le périmètre géographique retenu, par jointure avec la couche des SAGE.
+
 ```{r selection sur les territoires des SAGEs}
 
 sites_sages <- sites %>% 
@@ -240,6 +241,8 @@ resultats_sages <- resultats %>%
 
 ## Les sites font-ils partie du réseau RCS ?
 
+L'information sur le réseau de suivi est incluse dans les données sur les sites fournies par l'API. Le réseau RCS correspond au code SANDRE : 0000000052
+
 ```{r sites_rcs}
 sites_rcs <- sites_sages %>%
   # rowwise pour préciser que les opérations se font pour chaque ligne
@@ -249,12 +252,15 @@ sites_rcs <- sites_sages %>%
   select(code_station_hydrobio, inclus_rcs)
 ```
 
+## Carte des sites importés via Hub'eau, par département
+
 ```{r carte_sites}
 sites_sages %>%
   ggplot()+
   geom_sf(data=sages)+
 geom_sf(aes(color=libelle_departement))
 ```
+## Carte des résultats importés via Hub'eau, par qualification
 
 ```{r carte_resultats}
 resultats_sages %>%
@@ -262,7 +268,7 @@ resultats_sages %>%
   geom_sf(data=sages)+
 geom_sf(aes(color=libelle_qualification))
 ```
-
+## Exemple de résulat : Carte de l'indice Diatomées (IBD)
 ```{r carte_indice}
 resultats_sages %>%
   filter(code_indice == '5856')%>% #5856 IBD Indice Diatomées
@@ -275,6 +281,10 @@ geom_sf(aes(color=resultat_indice))
 
 ## Sites inconnus
 
+Les sites importés sont comparés à la table des sites bancarisés précédemment, par code SANDRE.
+
+Liste des sites inconnus :
+
 ```{r sites_inconnus}
 sites_inconnus <- sites_sages %>%
   # tables des sites
@@ -284,6 +294,7 @@ sites_inconnus <- sites_sages %>%
 sites_inconnus %>% 
   distinct(code_station_hydrobio, libelle_station_hydrobio)
 ```
+Carte des sites inconnus :
 
 ```{r carte_sites_inconnus}
 sites_inconnus %>%
@@ -292,7 +303,7 @@ sites_inconnus %>%
 geom_sf(aes(color=libelle_departement))
 ```
 
-## MAJ sites inconnus
+### Mise en forme des nouveaux sites en fonction du schema de la table des sites bancarisés
 
 ```{r table sites_inconnus}
 
@@ -321,13 +332,16 @@ maj)
 insert_sites
 
 ```
+### Insertion des nouveaux sites 
 
 ```{r insert sites_inconnus, eval=FALSE, include=FALSE}
 
 sf::dbWriteTable(conn = con_postgresql_dev, name = Id(schema = "eau_structure",table = "site"), value = insert_sites, overwrite=FALSE, append=TRUE, fileEncoding="latin1")
 ```
 
-## Import de la table de correspondance site / EGA
+## Table de correspondance site / territoires (EGA - Entités Geographiques et Administratives)
+
+La table de correspondance est issue de la jointure spatiale entre la table des sites et les différentes échelles de territoires bretons : Région, Départements, EPCI, SAGE, Contrats de territoires
 
 ```{r import_eau_correspondance_site_ega}
 correspondance_site_ega <- tbl(con_postgresql_dev, dbplyr::in_schema("eau_referentiel","geo_correspondance_site_ega"))%>%
@@ -335,6 +349,9 @@ correspondance_site_ega <- tbl(con_postgresql_dev, dbplyr::in_schema("eau_refere
 
 correspondance_site_ega
 ```
+## Liste des paramètres bancarisés
+
+La liste des paramètres est issue du dictionnaire national des données sur l'eau (SANDRE).
 
 ```{r import parametres}
 
@@ -347,18 +364,28 @@ parametres <- tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","paramet
 parametres
 ```
 
+## Seuils de qualité DCE
+
+La liste des seuils de qualité est produite à partir de l'[Arrêté du 27 juillet 2018](https://www.legifrance.gouv.fr/jorf/article_jo/JORFARTI000037347782) disponible sur Legifrance[^footnote] 
+
+[^footnote] [Arrêté du 27 juillet 2018 modifiant l'arrêté du 25 janvier 2010 relatif aux méthodes et critères d'évaluation de l'état écologique, de l'état chimique et du potentiel écologique des eaux de surface pris en application des articles R. 212-10, R. 212-11 et R. 212-18 du code de l'environnement - Légifrance (legifrance.gouv.fr)](https://www.legifrance.gouv.fr/jorf/article_jo/JORFARTI000037347782)
+
 ```{r import seuils de qualité}
 
 classes_qualite <- tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","join_parametre_classe"))%>%
   left_join(tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","classe")), by="classe_id")%>%
+  left_join( select(tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","parametre")),parametre_id,libelle, code), by="parametre_id")%>%
   collect()%>%
   filter(parametre_id %in% parametres$parametre_id,
          valide == 1)
 
-classes_qualite
+classes_qualite %>%
+  select(libelle.y, code.y, parametre_id, libelle_court, code.x, borne_inf_inclue, borne_sup_exclue, source)
 ```
 
 ## Table complète
+
+Table des résultats avec les attributs des référentiels
 
 ```{r table indices}
 table_indices <- resultats_sages %>%
@@ -384,6 +411,7 @@ table_indices <- resultats_sages %>%
 
 table_indices 
 ```
+### Synthèse des données manquantes
 
 ```{r donnees_manquantes}
 # Synthèse des données manquantes
@@ -406,8 +434,9 @@ table_indices %>% distinct(code_indice)
 
 ```
 
-
 ## Classes des indices
+
+Attribution des classes de qualité aux résultats par paramètre (indice biologique)
 
 ```{r classe_indices}
 table_indices_classes <- table_indices %>% 
@@ -418,6 +447,8 @@ table_indices_classes
 ```
 
 # Exploration des données
+
+## Données disponibles par an et par indice
 
 ```{r graphe_indices, fig.height=8, fig.width=16}
 table_indices_classes %>%
@@ -430,20 +461,26 @@ table_indices_classes %>%
   
 ```
 
+## Distribution des résultats par indice et par classe de qualité
+
 ```{r graphe_indices_classes, fig.height=8, fig.width=16}
 table_indices_classes %>%
-  arrange(code)%>%
-  ggplot(aes(x = code, y=resultat_indice, fill = code))+
+  arrange(code.x)%>%
+  ggplot(aes(x = code.x, y=resultat_indice, fill = code.x))+
            geom_boxplot()+
   facet_wrap(~libelle_indice, scales = "free")
   
 table_indices_classes
 ```
 
-
 # Transformation des données
 
 ## Données annuelles
+
+Données aggrégées par année d'analyse :
+
+- Indices moyens
+- Classes maximales
 
 ```{r table_indices_classes_annee}
 
@@ -458,14 +495,16 @@ table_indices_classes_annee <- table_indices_classes %>%
            libelle,
            symbole,
            Annee) %>%
-  summarise(classe = as.integer(max(code)), 
+  summarise(classe = as.integer(max(code.x)), 
             resultat_indice = mean(resultat_indice),
             resultat_qualification = as.integer(max(code_qualification)))
 
 table_indices_classes_annee
 ```
 
-## Classe de qualité biologique globale (max des classes par indice)
+## Classe de qualité biologique globale 
+
+Calcul d'une classe de *qualité biologique globale* (maximum des classes des indices annuels)
 
 ```{r}
 table_indices_classe_globale_annee <- table_indices_classes_annee %>%
@@ -484,7 +523,7 @@ table_indices_classe_globale_annee
 
 ### Mise en forme de la table
 
-```{r analyse_bio_esu, eval=FALSE, include=FALSE}
+```{r analyse_bio_esu}
 
 analyse_bio_esu <- table_indices %>%
   filter(!is.na(resultat_indice))%>%
@@ -518,7 +557,7 @@ analyse_bio_esu
 ### Sélection des nouvelles lignes à insérer
 
 ```{r insert_analyse_bio_esu}
-
+# TODO comparaison avec la base
 insert_analyse_bio_esu <- analyse_bio_esu
 
 ```
@@ -557,6 +596,8 @@ table_series_indices <- table_indices_classes_annee %>%
 table_series_indices
 ```
 ### Déclinaison par combinaison SITE / EGA
+
+La table de valorisation décline les résultats pour chaque échelle de territoire
 
 ```{r table_series_indices_ega}
 table_series_indices_ega <- table_series_indices%>%
@@ -597,6 +638,7 @@ oeb_eau_qualite_biologique_ce
 ```
 ### Sélection des lignes nouvelles à insérer
 
+La table de résultats est comparée aux données déjà bancarisées par une jointure d'exclusion (anti_join). Les lignes restantes peuvent être insérées.
 
 ```{r table insert_oeb_eau_qualite_biologique_ce}
 
@@ -620,7 +662,11 @@ dbExecute(con_eau_tbi, "TRUNCATE TABLE oeb_eau_qualite_biologique_ce")
 dbAppendTable(conn = con_eau_tbi, name = "oeb_eau_qualite_biologique_ce", value = insert_oeb_eau_qualite_biologique_ce, fileEncoding="latin1")
 ```
 
+## Exports CSV pour la publication du jeu de données sur les portails opendata
+
 ### Export pour le GIDE
+
+Fichier pour la publication du jeu de données sur le portail OEB
 
 ```{r export oeb_eau_qualite_biologique_ce}
 # Depuis la base de données
@@ -633,6 +679,10 @@ write.table(file = paste0(params$path_dataviz,"\\GIDE\\","oeb_eau_qualite_biolog
 ```
 
 ### Export pour GEOB
+
+Fichier pour la publication du jeu de données sur Geobretagne
+
+#### Mise en forme de la table pour l'ensemble des paramètres
 
 ```{r oeb_eau_qualite_geob}
 oeb_eau_qualite_geob <- table_series_indices  %>%
@@ -661,6 +711,8 @@ oeb_eau_qualite_geob <- table_series_indices  %>%
   pivot_wider(values_from = Resultat, names_from = Annee, names_sort=TRUE)
 ```
 
+#### Export pour le paramètre "Qualité globale"
+
 
 ```{r export oeb_eau_qualite_biologique_globale}
 
@@ -671,6 +723,8 @@ write.table(file = paste0(params$path_dataviz,"\\GEOB\\","oeb_eau_qualite_biolog
             fileEncoding = "UTF-8")
 ```
 
+#### Export pour le paramètre "Diatomées"
+
 ```{r export oeb_eau_qualite_diatomees}
 
 oeb_eau_qualite_geob %>%
@@ -680,6 +734,8 @@ write.table(file = paste0(params$path_dataviz,"\\GEOB\\","oeb_eau_qualite_diatom
             fileEncoding = "UTF-8")
 ```
 
+#### Export pour le paramètre "Macroinvertébrés"
+
 ```{r export oeb_eau_qualite_macroinvertebres}
 
 oeb_eau_qualite_geob %>%
@@ -688,6 +744,8 @@ write.table(file = paste0(params$path_dataviz,"\\GEOB\\","oeb_eau_qualite_macroi
             eol = "\n", na = "", dec = ",",
             fileEncoding = "UTF-8")
 ```
+
+#### Export pour le paramètre "Macrophytes"
 
 ```{r export oeb_eau_qualite_macrophytes}
 
