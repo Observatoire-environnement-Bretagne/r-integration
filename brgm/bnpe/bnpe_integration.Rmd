@@ -10,29 +10,18 @@ params:
 ```{r setup}
 knitr::opts_chunk$set(echo = TRUE)
 library(config) # Utilisation d'un fichier de configuration, cf  https://db.rstudio.com/best-practices/managing-credentials/#stored-in-a-file-with-config
-library(tidyverse)
+library(tidyverse) # Ensemble de packages pour le traitement de données
 library(DBI) # pour les connexions aux BDD
 library(RPostgreSQL) # driver postgres
-library(RMariaDB) # driver
+library(RMariaDB) # driver MariaDB
 library(RMySQL)
 library(lubridate) # calcul sur les dates
 
-library(httr) #
-library(jsonlite)
+library(httr) # Lecture de données en ligne
+library(jsonlite) # Lecture de fichiers JSON
 
 library(plotly) # Graphiques interactifs
 library(leaflet) # Cartes interactives
-
-
-
-# Fonction pour traduire la réponse de l'API
-api_reponse <- function(request) {
-  
-case_when(request$status_code==200 ~ "OK, tous les résultats sont présents dans la réponse",
-          request$status_code==206 ~ "OK, il reste des résultats",
-          request$status_code==400 ~ "Requête incorrecte",
-            TRUE ~ "Autre réponse")
-}
 
 # Fonction pour requêter l'API Hub'Eau
 

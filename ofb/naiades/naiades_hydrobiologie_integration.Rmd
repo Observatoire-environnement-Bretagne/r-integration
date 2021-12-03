@@ -755,3 +755,14 @@ write.table(file = paste0(params$path_dataviz,"\\GEOB\\","oeb_eau_qualite_macrop
             eol = "\n", na = "", dec = ",",
             fileEncoding = "UTF-8")
 ```
+
+#### Export pour le paramètre "Poissons"
+
+```{r export oeb_eau_qualite_macrophytes}
+
+oeb_eau_qualite_geob %>%
+  filter(Serie == 'Classe - Macrophytes') %>%
+write.table(file = paste0(params$path_dataviz,"\\GEOB\\","oeb_eau_qualite_macrophytes.csv"), quote = TRUE, sep = ";",
+            eol = "\n", na = "", dec = ",",
+            fileEncoding = "UTF-8")
+```
