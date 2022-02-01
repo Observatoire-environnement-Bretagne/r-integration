@@ -7,13 +7,17 @@ params:
   num_departement: '22,29,35,56,50,44,49,53'
   codes_parametres: '7036,5910,1022,5856,2928,6959,6951,6955,1000,2527'
   date_debut: '2017-01-01'
-  date_fin: '2019-12-31'
+  date_fin: '2020-12-31'
   pagination: 5000
   path_dataviz: O:\04.DATAVISUALISATION\INDICATEURS_BIOLOGIE\DCE_ETAT_BIOLOGIQUE
 ---
 
 ```{r setup}
 knitr::opts_chunk$set(echo = TRUE)
+
+#utilisation du package renv
+#renv::init()
+renv::status()
 
 # Packages utilisés
 library(config) # Utilisation d'un fichier de configuration, cf  https://db.rstudio.com/best-practices/managing-credentials/#stored-in-a-file-with-config
@@ -429,9 +433,6 @@ table_indices %>% filter(is.na(unite_id)) %>% distinct(unite_indice)
 # Stations inconnues de la table des sites
 table_indices %>% filter(is.na(site_id)) %>% distinct(libelle_station_hydrobio)
 
-# Liste des codes indices
-table_indices %>% distinct(code_indice)
-
 ```
 
 ## Classes des indices
@@ -450,14 +451,14 @@ table_indices_classes
 
 ## Données disponibles par an et par indice
 
-```{r graphe_indices, fig.height=8, fig.width=16}
+```{r graphe_indices, fig.height=9, fig.width=16}
 table_indices_classes %>%
   group_by(year(date_prelevement), libelle_support, libelle_indice) %>%
   summarise(Nb_resultats = n(),
             Annee = year(date_prelevement)) %>%
   ggplot(aes(x = as.factor(Annee), y=Nb_resultats, fill=libelle_indice))+
            geom_bar(stat="identity")+
-  facet_grid(libelle_support~.)
+  facet_grid(libelle_support~., scales = "free")
   
 ```
 
@@ -557,15 +558,18 @@ analyse_bio_esu
 ### Sélection des nouvelles lignes à insérer
 
 ```{r insert_analyse_bio_esu}
-# TODO comparaison avec la base
-insert_analyse_bio_esu <- analyse_bio_esu
+# Comparaison avec la base
+insert_analyse_bio_esu <- analyse_bio_esu %>% 
+  anti_join(tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","analyse_bio_esu")), by=c("site_id", "date_id", "prelevement_code", "parametre_id", "resultat", "remarque_id"), copy=TRUE)
+
+insert_analyse_bio_esu
 
 ```
 
 ### Insertion des nouvelles lignes
 
 ```{r insert resultats_inconnus, eval=FALSE, include=FALSE}
-dbExecute(con_postgresql_dev, "TRUNCATE TABLE eau_structure.analyse_bio_esu")
+#dbExecute(con_postgresql_dev, "TRUNCATE TABLE eau_structure.analyse_bio_esu")
 
 dbAppendTable(conn = con_postgresql_dev, name = Id(schema = "eau_structure",table = "analyse_bio_esu"), value = insert_analyse_bio_esu, fileEncoding="latin1")
 ```
@@ -645,7 +649,7 @@ La table de résultats est comparée aux données déjà bancarisées par une jo
 insert_oeb_eau_qualite_biologique_ce <- oeb_eau_qualite_biologique_ce %>% 
   ungroup() %>%
   # Retirer les lignes des résultats déjà existants dans la table
-  anti_join(tbl(con_eau_tbi,"oeb_eau_qualite_biologique_ce", by=c("Type_entitite_geographique", "Code_entitite_geographique", "Type_entitite_geographique_associee", "Code_entitite_geographique_associee", "Periode", "Serie")), copy = TRUE)%>%
+  anti_join(tbl(con_eau_tbi,"oeb_eau_qualite_biologique_ce"), by=c("Type_entitite_geographique", "Code_entitite_geographique", "Type_entitite_geographique_associee", "Code_entitite_geographique_associee", "Periode", "Serie"), copy = TRUE)%>%
   # Retirer les stations hydro sans EGA identifiée
   filter(!is.na(Type_entitite_geographique))%>%
   # Retirer les lignes avec une valeur NA
