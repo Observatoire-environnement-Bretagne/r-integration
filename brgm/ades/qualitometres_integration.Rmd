@@ -4,7 +4,7 @@ output: html_notebook
 params:
   codes_reseau: '0000000028,0400000020,0400000124,0400000127,0400000128,0400000192,0400003006,0400001001,0400001002,0400000201'
   num_departement: '22,29,35,56,50,44,49,53'
-  date_debut: 2020-01-01
+  date_debut: 2017-01-01
   date_fin: 2020-12-31
   pagination: 5000
 ---
@@ -72,6 +72,9 @@ library(lubridate) # calcul sur les dates
 library(httr) #
 library(jsonlite)
 
+library(sf) # Traitement de données géoréférencées
+library(mapview) # Affichage de données géoréférencées
+
 # Fonction pour traduire la réponse de l'API
 api_reponse <- function(request) {
   
@@ -124,28 +127,28 @@ return(data)
 
 ```{r connexion_bd}
 
-# conf <- config::get("mysql_local")
-# 
-# con_mysql_local <- dbConnect(odbc::odbc(),
-#                              Driver=conf$driver,
-#                              host = conf$host,
-#                              UID = conf$uid,
-#                              PWD = conf$pwd,
-#                              port = conf$port,
-#                              timeout = 10,
-#                              database = "oeb_tbi",
-#                              encoding = "latin1")
-
-con_mysql_oeb <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
+# Base Mariadb OEB - eau_tbi
+con_eau_tbi <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
 dbname = "eau_tbi")
 
-dbListTables(con_mysql_oeb) # Lister les tables de la base
+# Base Postgres (développement)
+
+conf <- config::get("postgres_dev")
+
+con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
+                          Driver       = conf$driver,
+                          servername   = conf$server,
+                          UID = conf$uid,
+                          PWD = conf$pwd,
+                          Port = conf$port,
+                          database = 'eau',
+                             encoding = "latin1")
 ```
 
 ```{r qualitometres}
 # Recupération de la liste des piézomètres du réseau breton dans la base de données
 
-db_qualitometres <- tbl(con_mysql_oeb, "oeb_tbi_nitrate_nappe") # Lecture de la table des piezometres
+db_qualitometres <- tbl(con_eau_tbi, "oeb_tbi_nitrate_nappe") # Lecture de la table des qualitomètres nitrates
 
 db_qualitometres %>% distinct(CdSiteSurv) %>%tally() #574 qualitometres
 
@@ -156,38 +159,235 @@ liste_codes_bss <- db_qualitometres %>% distinct(CdSiteSurv) %>% collect() %>%
 
 
 
-```{r hubeau}
+```{r hubeau, eval=FALSE, include=FALSE}
 
 # Récupération des infos sur les stations de mesure
 
 #liste_codes_bss <- c('03462X0036/P')
 
 # Liste des paramètres de la requête
-query_stations = list(
+query_sites = list(
   num_departement=params$num_departement,
   format='json',
   size=params$pagination
   )
 
 # Requête des stations
-hubeau_stations <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/qualite_nappes/stations?", query = query_stations)
+hubeau_sites <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/qualite_nappes/stations?", query = query_sites)
+
+# Conversion au format géographique
+sites <- st_as_sf(hubeau_sites, coords = c("longitude", "latitude"), 
+    crs = 4326, agr = "constant")
+
+sites%>%saveRDS("sites.rds")
 
 # Récupération des chroniques
 
+# Liste des paramètres de la requête (lot 1 de départements)
+
 # Liste des paramètres de la requête
-query_analyses = list(
-                 codes_reseau=params$codes_reseau,
+query_resultats = list(
+                 #codes_reseau=params$codes_reseau,
+                 num_departement = "29,22,35",
+                 code_param = '1340',
                  format = 'json',
                  size = params$pagination,
                  date_debut_mesure = params$date_debut,
-                 date_fin_mesure = as.Date(params$date_fin)-1)
+                 date_fin_mesure = as.Date(params$date_fin))
 
 # Requête des analyses
-hubeau_analyses <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/qualite_nappes/analyses?", query=query_analyses)
+hubeau_resultats <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/qualite_nappes/analyses?", query=query_resultats)
+
+# Liste des paramètres de la requête (lot 2 de départements)
+
+# Liste des paramètres de la requête
+query_resultats = list(
+                 #codes_reseau=params$codes_reseau,
+                 num_departement = "56,50,44,49,53",
+                 code_param = '1340',
+                 format = 'json',
+                 size = params$pagination,
+                 date_debut_mesure = params$date_debut,
+                 date_fin_mesure = as.Date(params$date_fin))
+
+# Requête des analyses --> Union avec la requête précédente
+hubeau_resultats <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/qualite_nappes/analyses?", query=query_resultats) %>% union(hubeau_resultats)
+
+# Conversion au format géographique
+resultats <- st_as_sf(hubeau_resultats, coords = c("longitude", "latitude"), 
+    crs = 4326, agr = "constant")
+
+resultats%>%saveRDS("resultats.rds")
 ```
+
+```{r readRDS_resultats}
+resultats <- readRDS("resultats.rds")
+
+sites <- readRDS("sites.rds")
+```
+
+Les stations de mesure et les chroniques d'analyses sont récupérées sur les départements `r params$num_departement` sur la période , via la fonction *get_hubeau(path, query)* définie ci-dessus.
+
+- path : adresse de l'API
+- query : liste des paramètres de requête avec leurs valeurs (code_)
+
+Les départements séparés en deux lots pour respecter les contraintes de nb de lignes totales récupérées par requête.
+
+# Import des référentiels géographiques
+
+Les polygones des territoires de SAGE bretons sont récupérées depuis le flux WFS de la DREAL Bretagne, ils correspondent au périmètre géographique des données à bancariser.
+
+```{r couche_sages}
+# couche des SAGEs bretons depuis Geobretagne
+sages <- st_read("https://geobretagne.fr/geoserver/dreal_b/sage_dreal/wfs?SERVICE=WFS&REQUEST=GetCapabilities")
+
+# pb pas moyen de manipuler cet objet => solution sur
+# https://gis.stackexchange.com/questions/389814/r-st-centroid-geos-error-unknown-wkb-type-12/389854#389854
+ensure_multipolygons <- function(X) {
+  tmp1 <- tempfile(fileext = ".gpkg")
+  tmp2 <- tempfile(fileext = ".gpkg")
+  st_write(X, tmp1)
+  gdalUtilities::ogr2ogr(tmp1, tmp2, f = "GPKG", nlt = "MULTIPOLYGON")
+  Y <- st_read(tmp2)
+  st_sf(st_drop_geometry(X), geom = st_geometry(Y))
+}
+
+sages <- ensure_multipolygons(sages) %>% st_transform(4326)
+```
+# Sélection des sites et des résultats sur les territoires des SAGE bretons
+
+Les sites et résultats téléchargés sont sélectionnés sur le périmètre géographique retenu, par jointure avec la couche des SAGE.
+
+```{r selection sur les territoires des SAGEs}
+
+sites_sages <- sites %>% 
+  st_join(sages) %>% 
+  filter(!is.na(cd_sage))
+
+resultats_sages <- resultats %>% 
+  st_join(sages) %>% 
+  filter(!is.na(cd_sage))
+
+```
+
+## Carte des sites importés via Hub'eau, par département
+
+```{r carte_sites}
+sites_sages %>%
+  ggplot()+
+  geom_sf(data=sages)+
+geom_sf(aes(color=nom_departement))
+```
+
+## Carte des résultats importés via Hub'eau, par qualification
+
+```{r carte_resultats}
+resultats_sages %>%
+  filter(code_param == "1340") %>% # Nitrates
+  ggplot()+
+  geom_sf(data=sages)+
+geom_sf(aes(color=resultat))
+```
+
+```{r nb_prelevements}
+resultats_sages %>%
+  mutate(annee = format.Date(date_debut_prelevement,"%Y"),
+         code_prelevement = paste0(code_bss,'_',date_debut_prelevement)) %>%
+  group_by(annee)%>%
+    summarise(nb_prel = n_distinct(date_debut_prelevement))%>%
+  as.tibble()%>%
+  ggplot(aes(x=annee, y=nb_prel))+
+  geom_bar(stat="identity")
+```
+
+```{r resultats_par_site}
+resultats_sages %>% 
+  distinct(nom_commune_actuel)
+```
+# Jointure avec les tables référentiels
+
+## Sites inconnus
+
+Les sites importés sont comparés à la table des sites bancarisés précédemment, par code SANDRE.
+
+Liste des sites inconnus :
+
+```{r sites_inconnus}
+sites_inconnus <- sites_sages %>%
+  # tables des sites
+  left_join(tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","site")), by=c("code_bss" = "code"), copy=TRUE, suffix = c("", ".site"))%>%
+  filter(is.na(site_id))
+
+sites_inconnus %>% 
+  distinct(code_bss, libelle_pe, nom_commune)
+```
+
+```{r carte_sites_inconnus}
+sites_inconnus %>%
+  ggplot()+
+  geom_sf(data=sages)+
+geom_sf(aes(color=num_departement))
+```
+### Mise en forme des nouveaux sites en fonction du schema de la table des sites bancarisés
+
+```{r table sites_inconnus}
+
+insert_sites <- sites_inconnus %>%
+  mutate(coord_x = st_coordinates(st_transform(geometry, 2154))[,1],
+         coord_y = st_coordinates(st_transform(geometry, 2154))[,2],
+         longitude_wgs84 = st_coordinates(st_transform(geometry, 4326))[,1],
+         latitude_wgs84 = st_coordinates(st_transform(geometry, 4326))[,2],
+         libelle = 'Piézomètre de ',libelle_pe,' (',nom_commune,' - ',num_departement,')',
+         typesite_id = '4',
+         projection_id = '2154',
+         source = 'BRGM/ADES',
+         maj = format(Sys.Date(),"%Y-%m-%d")
+         )%>% 
+  as_tibble() %>%
+select(code = code_bss,
+libelle,
+typesite_id,
+coord_x,
+coord_y,
+projection_id,
+longitude_wgs84,
+latitude_wgs84,
+source,
+maj)
+
+insert_sites
+
+```
+### Insertion des nouveaux sites 
+
+```{r insert sites_inconnus, eval=FALSE, include=FALSE}
+
+sf::dbWriteTable(conn = con_postgresql_dev, name = Id(schema = "eau_structure",table = "site"), value = insert_sites, overwrite=FALSE, append=TRUE, fileEncoding="latin1")
+```
+
+## Table complète
+
+```{r analyse_pc_eso}
+
+```
+
+# Données à importer dans la table eau.eau_structuree.analyses_pc_eso
 
 ```{r}
-hubeau_stations
+names(resultats_sages)
+# SELECT(
+# rdd_id,
+# site_id,
+# date_id,
+# prelevement_code,
+# milieu_id,
+# support_id,
+# fraction_id,
+# parametre_id,
+# resultat,
+# remarque_id,
+# limite_quantification,
+# source,
+# maj)
 ```
-
 
