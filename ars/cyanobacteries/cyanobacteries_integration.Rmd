@@ -3,9 +3,13 @@ title: "Integration données ARS / cyanobactéries"
 output: html_notebook
 params:
   chemin_source: O:/01.BD_EAU/ARS/CYANOBACTERIES/SOURCE/Envois_ARS
-  actualisation: '2020'
+  actualisation: '2021'
   seuil_denombrement: 100000
   contexte: developpement
+  seuil_ANTXA: 0
+  seuil_CYSPPS: 42
+  seuil_MCTOT: 0.3
+  seuil_SAXIT: 30
 ---
 
 ```{r setup}
@@ -82,6 +86,8 @@ paste0("Données insérées : ",data%>%tally)
 con_mysql_oeb <- dbConnect(RMariaDB::MariaDB(), default.file = '../../.my.cnf', groups="mysql_oeb",
 dbname = "eau_ars_cyano")
 
+dbListTables(con_mysql_oeb) # Lister les tables de la base
+
 conf <- config::get("postgres_dev")
 
 con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
@@ -90,11 +96,11 @@ con_postgresql_dev <- DBI::dbConnect(odbc::odbc(),
                           UID = conf$uid,
                           PWD = conf$pwd,
                           Port = conf$port,
-                          database = conf$database,
+                          database = "eau",
                              encoding = "latin1")
 
   
-dbListTables(con_mysql_oeb) # Lister les tables de la base
+dbListTables(con_postgresql_dev) # Lister les tables de la base
 
 ```
 # Import du fichier d'échanges
@@ -116,6 +122,21 @@ if (length(fichier)>1) {
 - contact : Marie-Agnès PILARD, [marie-agnes.pilard@ars.sante.fr](mailto:marie-agnes.pilard@ars.sante.fr))
 - Dossier d'import : [`r params$chemin_source`](`r params$chemin_source`)
 - Fichier : [`r fichier`](`r paste0(params$chemin_source,'/',fichier)`)
+
+## Table de correspondance entre les séries de données et les colonnes du fichier
+
+```{r correspondance_serie_colonnes}
+# Series de données "Toxines"
+correspondance_series_colonnes <- data.table::data.table(
+  serie = c('Nombre de cellules de cyanobactéries','Part des cyanobactéries','Nombre de cellules de cyanobactéries toxinogènes','Biovolume de cyanobactéries toxinogènes', 'Concentration en SOMME DES MICROCYSTINES','Concentration en ANATOXINE A','Concentration en CYLINDROSPERMOPSINE','Concentration en SAXITOXINE','Présence de toxine','Flore Totale (cell./ml)'),
+  colonne = c('Cyanobactéries (cell./ml)','Colonies de cyanobactéries (%)','Cyanobactéries toxinogènes (cell./ml)','Cyanobactéries toxinogènes (mm3/L)','Microcystines (µg/L)','Anatoxine A (µg/L)','Cylindrospermopsine (µg/L)','Saxitoxine (µg/L)','Présence de toxine','Flore Totale (cell./ml)'),
+  parametre_code = c('3206','3206','7742','7742','6278','7550','7552','7551','0','3084'),
+  serie_code = c('3206_nombre','3206_pourcentage','7742_nombre','7742_biovolume','6278_concentration','7550_concentration','7552_concentration','7551_concentration','toxine_presence','3084_nombre')
+)
+```
+
+
+# Sites de surveillance des eaux de baignade ARS
 
 ```{r sites de surveillance}
 db_site <- tbl(con_mysql_oeb, "ars_cyano_site") # Récupération de la table des sites connus dans la BDD
@@ -140,65 +161,148 @@ data_sites <- read_xlsx(paste0(params$chemin_source,'/',fichier),
 ```{r observations}
 data_observations <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
           sheet=paste0(params$actualisation,"_Liste des sites BZH"))%>% 
-  mutate(CdSiteSurv = as.character(`SIT - Code national`),
-         Observations = as.character(`Observations`),
-         Annee = params$actualisation,
-         Maj_OEB = format.Date(Sys.Date(),"%Y-%m-%d")
-         )%>%
-  select(CdSiteSurv,Annee,Observations,Maj_OEB)
+  mutate(rdd_code = '0000000024',
+         site_code = as.character(`SIT - Code national`),
+         commentaire = as.character(`Observations`),
+         annee = params$actualisation,
+         date_debut = as.Date(paste0(params$actualisation,'-06-15')),
+         date_fin = as.Date(paste0(params$actualisation,'-09-15')),
+         duree_saison = interval(date_debut,date_fin)/days(1),
+         unite_code = '61',
+         source = 'ARS',
+         maj = today()
+         )
+
+# Table au format structure
+cyano_saison <- data_observations%>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="site")),site_id,code), by=c("site_code" = "code"), copy=TRUE)%>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_referentiel", table="unite")),unite_id,code), by=c("unite_code" = "code"), copy=TRUE)%>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="dispositifcollecte_rdd")),rdd_id,code), by=c("rdd_code" = "code"), copy=TRUE)%>%
+  select(rdd_id,site_id,annee,date_debut,date_fin,duree_saison,unite_id,commentaire,source,maj)
+
+cyano_saison
+```
+## Ecriture dans la base structure
+
+```{r insert_cyano_saison, eval=FALSE, include=FALSE}
+dbAppendTable(con_postgresql_dev, Id(schema="eau_structure", table="cyano_saison"), value = cyano_saison)
+# 27 lignes ajoutées le 18/01/2022
 ```
 
-
-## Résultats Toxines présents dans SISE-Baignade
+# Résultats Toxines présents dans SISE-Baignade
 ```{r donnees_toxines}
 
 # Lecture de l'onglet "Toxines" dans le fichier d'import Excel
 data_toxines <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
-          sheet=paste0(params$actualisation,"_Toxines"),
-          skip = 3)%>%  # Le tableau commence à la 4ème ligne
+          sheet=paste0(params$actualisation,"_Cyanos_Toxines"),
+          skip = 7)%>%  # Le tableau commence à la 8ème ligne
   rename_with(~str_remove(., ' TOTALE'))%>% # Retirer le suffixe ' TOTALE' qui est présent sur (certains) noms de colonne
-  mutate(CdSiteSurv = as.character(`SIT - Code national`),
-         DatePrel = as.Date(`PLV Date`),
-         CdPrel = ifelse(!is.na(`PLV Code`), as.character(`PLV Code`), paste0(as.character(`SIT - Code national`),format.Date(as.Date(`PLV Date`),"%y%m%d"))),
-         `Présence de toxine` = (`SOMME DES MICROCYSTINES ANALYSÉES` > 0 
-                                 | `ANATOXINE A` > 0
-                                 | `CYLINDROSPERMOPSINE` > 0
-                                 | `SAXITOXINE` > 0) # TRUE si au moins une toxine détectée
+  mutate(site_code = as.character(`SIT - Code national`),
+         prelevement_date = as.Date(`PLV - Date`),
+         prelevement_code = ifelse(!is.na(`PLV - Code`), as.character(`PLV - Code`), paste0(as.character(`SIT - Code national`),format.Date(as.Date(`PLV - Date`),"%y%m%d"))),
+         `Flore Totale (cell./ml)` = round((100-as.numeric(`Colonies de cyanobactéries (%)`))/100*as.numeric(`Cyanobactéries (cell./ml)`)),
+         `Présence de toxine` = ifelse(as.numeric(`Anatoxine A (µg/L)`) > 0 
+                                 | as.numeric(`Cylindrospermopsine (µg/L)`) > 0
+                                 | as.numeric(`Microcystines (µg/L)`) > 0
+                                 | as.numeric(`Saxitoxine (µg/L)`) > 0,
+                                 TRUE,
+                                 FALSE) # TRUE si au moins une toxine détectée
          )%>%
-  select(CdSiteSurv, 
-         DatePrel, 
-         CdPrel,
-         `Concentration en SOMME DES MICROCYSTINES` = `SOMME DES MICROCYSTINES ANALYSÉES`, 
-         `Concentration en ANATOXINE A` = `ANATOXINE A`, 
-         `Concentration en CYLINDROSPERMOPSINE` = `CYLINDROSPERMOPSINE`, 
-         `Concentration en SAXITOXINE` = `SAXITOXINE`, 
+  select(site_code, 
+         prelevement_date, 
+         prelevement_code,
+         `Flore Totale (cell./ml)`,
+         `Colonies de cyanobactéries (%)`,
+         `Cyanobactéries (cell./ml)`,
+         `Cyanobactéries toxinogènes (cell./ml)`,
+         `Cyanobactéries toxinogènes (mm3/L)`,
+         `Microcystines (µg/L)`, 
+         `Anatoxine A (µg/L)`, 
+         `Cylindrospermopsine (µg/L)`, 
+         `Saxitoxine (µg/L)`, 
          `Présence de toxine`) # Sélection des colonnes
 
 # Transformation en un tableau long (par série de donnée)
 series_toxines <- data_toxines %>%
-  gather(key="Serie", value="resultat",-CdSiteSurv, -DatePrel, -CdPrel)%>%
-  mutate(unite = case_when(
-      Serie == "Présence de toxine" ~ "-",
-      TRUE                          ~ "µg/l"
-    ))
+  gather(key="colonne", value="resultat",-site_code, -prelevement_date, -prelevement_code)%>%
+  # Attribution des séries aux colonnes de la table source
+  left_join(correspondance_series_colonnes, by="colonne")%>%
+  # code remarque
+  mutate(rdd_code = '0000000024',
+         milieu_code = '3.2',
+         support_code = '11',
+         fraction_code = '23',
+         remarque_code = case_when(parametre_code == '486' ~ '4', # Présence ou absence 
+                                   resultat == '<100' ~ '9', # Denombrement < Valeur
+                                   is.na(resultat) ~ '0', # Analyse non faite
+                                   
+                                   resultat == 'N.D.' ~ '2', # < seuil de détection
+                                   startsWith(resultat,'<') ~ '10', # < seuil de quantification
+                                   TRUE ~ '1' # Domaine de validité
+                                   ),
+         limite_quantification = case_when(resultat == '<0,1' ~ 0.1,
+                                      resultat == '<0,3' ~ 0.3,
+                                      resultat == '<100' ~ 100,
+                                      resultat == '<1' ~ 1),
+         # Récupération du résultat numérique. Resultat = limite de quantification si < seuil
+         resultat = case_when(startsWith(resultat, '<') ~ limite_quantification,
+                                      resultat == TRUE ~ 1,
+                                      resultat == FALSE ~ 0,
+                                      TRUE ~ as.numeric(resultat)),
+         source = 'ARS',
+         maj = today()
+         )
+
 
 # Synthèse des données à importer
 
 data_toxines %>%
-  left_join(db_site, by = "CdSiteSurv", copy = TRUE)%>%
+  left_join(db_site, by = c("site_code" = "CdSiteSurv"), copy = TRUE)%>%
  #filter(CdSiteSurv == 22001425)%>%
-  summarise("Nombre de sites" = n_distinct(CdSiteSurv),
+  summarise("Nombre de sites" = n_distinct(site_code),
             "Sites connus" = n_distinct(LbSiteSurv),
-            "Nombre de prélèvements" = n_distinct(CdPrel),
-            "Dernier" = max(DatePrel),
-            "Détexions de toxines" = sum(`Présence de toxine`),
-            "Sites avec détexion" = n_distinct(CdSiteSurv[`Présence de toxine`])
+            "Nombre de prélèvements" = n_distinct(prelevement_code),
+            "Dernier" = max(prelevement_date),
+            "Détexions de toxines" = sum(`Présence de toxine`, na.rm = TRUE),
+            "Sites avec détexion" = n_distinct(site_code[`Présence de toxine`]),
+            "Analyses avec biovolume > 1" = sum(ifelse(as.numeric(`Cyanobactéries toxinogènes (mm3/L)`) > 1, 1, 0),na.rm = TRUE), # Biovolume > 1 (alerte 1)
+            "Analyses avec toxines > seuil" = sum(ifelse(as.numeric(`Microcystines (µg/L)`)>params$seuil_MCTOT
+                                                         | as.numeric(`Anatoxine A (µg/L)`)>params$seuil_ANTXA
+                                                         | as.numeric(`Cylindrospermopsine (µg/L)`) > params$seuil_CYSPPS
+                                                         | as.numeric(`Saxitoxine (µg/L)`) > params$seuil_SAXIT, 
+                                                         1,0),na.rm = TRUE) # Au moins une toxine dépasse le seuil (alerte 2)
   )
 
-```
-# Denombrements
 
-```{r}
+# Format de la table eau_structure.cyano_analyse
+
+cyano_analyse <- series_toxines %>%
+  filter(!is.na(resultat) & ! is.na(serie_code))%>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="serie")),serie_id,unite_id,code), by=c("serie_code" = "code"), copy=TRUE)%>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="parametre")),parametre_id,code), by=c("parametre_code" = "code"), copy=TRUE)%>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="site")),site_id,code), by=c("site_code" = "code"), copy=TRUE) %>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="dispositifcollecte_rdd")),rdd_id,code), by=c("rdd_code" = "code"), copy=TRUE) %>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="remarque")),remarque_id,code), by=c("remarque_code" = "code"), copy=TRUE) %>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="fraction")),fraction_id,code), by=c("fraction_code" = "code"), copy=TRUE) %>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="support")),support_id,code), by=c("support_code" = "code"), copy=TRUE) %>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="milieu")),milieu_id,code), by=c("milieu_code" = "code"), copy=TRUE)%>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="date")),date_id,date_du_jour), by=c("prelevement_date" = "date_du_jour"), copy=TRUE)%>%
+  select(rdd_id, site_id, date_id, prelevement_code, milieu_id, support_id, fraction_id, serie_id, parametre_id, resultat, unite_id, remarque_id, limite_quantification, source, maj)
+
+cyano_analyse %>% filter(remarque_id == 10)
+```
+## Ecriture dans la base structure
+
+```{r insert_cyano_analyse, eval=FALSE, include=FALSE}
+
+dbAppendTable(con_postgresql_dev, Id(schema="eau_structure", table="cyano_analyse"), value = cyano_analyse)
+
+# 1590  lignes ajoutées le 18/01/2022
+```
+
+## OBSOLETE
+
+```{r series_denombrements_obsolete, eval=FALSE, include=FALSE}
 
 # Lecture de l'onglet "Denombrements" dans le fichier d'import Excel
 series_denombrements <- read_xlsx(paste0(params$chemin_source,'/',fichier), 
@@ -244,9 +348,9 @@ series_denombrements%>%
   )
          
 ```
-# table resultats
+# table resultats OBSOLETE
 
-```{r}
+```{r series_resultats, eval=FALSE, include=FALSE}
 
 # Table regroupant les résultats de prélèvements (dénombrements + toxines)
 series_resultats <- series_denombrements %>%
@@ -262,7 +366,9 @@ union(series_toxines)
 
 # Interdictions
 
-```{r}
+## Lecture du fichier source
+
+```{r data_interdictions}
 # Modification du nom de l'onglet depuis 2020 : Fermetures > Interdictions
 if (params$actualisation == '2019') {
   onglet_interdiction <- "_Fermetures Détail"
@@ -275,26 +381,31 @@ data_interdictions <- read_xlsx(paste0(params$chemin_source,'/',fichier),
           sheet=paste0(params$actualisation,onglet_interdiction), # Nom de l'onglet : ANNEE_Fermetures Détail
           skip = 4, # Le tableau commence à la 5ème ligne
           )%>%
-  mutate(CdSiteSurv = as.character(`SIT - Code national`),
-         Date_debut = as.Date(`INT - Date de début`),
-         Date_fin = as.Date(`INT - Date de fin`),
-         CdPrel = paste0(format(`INT - Date de début`,"%d/%m")," > ",format(`INT - Date de fin`,"%d/%m/%y")),
-         nb_jours_interdiction = interval(Date_debut,Date_fin)/days(1),
-         nb_jours_interdiction_periode = intersect(interval(Date_debut,Date_fin),periode)/days(1))%>% # identifiant de la fermeture au format : "21/06 > 30/06"
-  select(CdSiteSurv,Date_debut,Date_fin,nb_jours_interdiction,nb_jours_interdiction_periode)
+  mutate(site_code = as.character(`SIT - Code national`),
+         date_debut = as.Date(`INT - Date de début`),
+         date_fin = as.Date(`INT - Date de fin`),
+         duree_interdiction = interval(date_debut,date_fin)/days(1),
+         duree_interdiction_saison = intersect(interval(date_debut,date_fin),periode)/days(1),
+         unite_code = '61',
+         type_libelle = `INT - Type - Libellé`,
+         commentaire = `INT - Commentaires`,
+         source = 'ARS',
+         maj = today())
 
-# Création d'une ligne par jour d'interdiction
-jours_interdiction <- data_interdictions %>%
-  mutate(CdPrel = paste0(format(Date_debut,"%d/%m")," > ",format(Date_fin,"%d/%m/%y")), # identifiant de la fermeture au format : "21/06 > 30/06"
-         Serie = "Nombre de jours d'interdiction baignade",
-         unite = "nb jours")%>%
-  group_by(CdSiteSurv, CdPrel, Serie) %>%
-  group_modify(~ {DatePrel <- seq.Date(from = .x$Date_debut, to = .x$Date_fin-1, by = 1L) 
-                 crossing(DatePrel)})%>%
-  mutate(resultat = 1,
-         unite = "nb jours")%>%
-  ungroup()
+cyano_interdiction <- data_interdictions%>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="site")),site_id,code), by=c("site_code" = "code"), copy=TRUE)%>%
+  left_join(select(tbl(con_postgresql_dev, Id(schema="eau_referentiel", table="unite")),unite_id,code), by=c("unite_code" = "code"), copy=TRUE)%>%
+  select(site_id,date_debut,date_fin,duree_interdiction,duree_interdiction_saison,unite_id,type_libelle,commentaire,source,maj)
+
+cyano_interdiction
 ```
+## Ecriture dans la base structure
+
+```{r insert_cyano_interdiction, eval=FALSE, include=FALSE}
+dbAppendTable(con_postgresql_dev, Id(schema="eau_structure", table="cyano_interdiction"), value = cyano_interdiction)
+# 9 lignes ajoutées le 18/01/2022
+```
+
 
 # Ecriture dans la base 
 
