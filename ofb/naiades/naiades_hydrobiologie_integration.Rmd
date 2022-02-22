@@ -5,8 +5,8 @@ params:
   api_sites: https://hubeau.eaufrance.fr/api/vbeta/hydrobio/stations_hydrobio?
   api_resultats: https://hubeau.eaufrance.fr/api/vbeta/hydrobio/indices?
   num_departement: '22,29,35,56,50,44,49,53'
-  codes_parametres: '7036,5910,1022,5856,2928,6959,6951,6955,1000,2527'
-  date_debut: '2017-01-01'
+  codes_parametres: '5856,2928,7036,1000,5910,2527,6951,7613,1022'
+  date_debut: '2007-01-01'
   date_fin: '2020-12-31'
   pagination: 5000
   path_dataviz: O:\04.DATAVISUALISATION\INDICATEURS_BIOLOGIE\DCE_ETAT_BIOLOGIQUE
@@ -182,7 +182,7 @@ query_resultats = list(
                  code_indice = params$codes_parametres,
                  #les paramètres date_debut et date_fin créent un bug dans l'API https://github.com/BRGM/hubeau/issues/81
                  #date_debut_prelevement = params$date_debut,
-                 #date_fin_prelevement = params$date_fin,
+                 #date_fin_prelevement = params$date_fin
                  size = params$pagination,
                  format = 'json')
 
@@ -254,6 +254,8 @@ sites_rcs <- sites_sages %>%
   # Le code 0000000052 (RCS) est dans la liste des codes_réseaux
   mutate(inclus_rcs = '0000000052' %in% unlist(codes_reseaux))%>%
   select(code_station_hydrobio, inclus_rcs)
+
+summary(sites_rcs)
 ```
 
 ## Carte des sites importés via Hub'eau, par département
@@ -278,7 +280,7 @@ resultats_sages %>%
   filter(code_indice == '5856')%>% #5856 IBD Indice Diatomées
   ggplot()+
   geom_sf(data=sages)+
-geom_sf(aes(color=resultat_indice))
+geom_sf(aes(color=libelle_qualification))
 ```
 
 # Jointure avec les tables référentiels
@@ -341,6 +343,8 @@ insert_sites
 ```{r insert sites_inconnus, eval=FALSE, include=FALSE}
 
 sf::dbWriteTable(conn = con_postgresql_dev, name = Id(schema = "eau_structure",table = "site"), value = insert_sites, overwrite=FALSE, append=TRUE, fileEncoding="latin1")
+
+# 47 sites ajoutés le 21/02/2022
 ```
 
 ## Table de correspondance site / territoires (EGA - Entités Geographiques et Administratives)
@@ -496,6 +500,8 @@ table_indices_classes_annee <- table_indices_classes %>%
            libelle,
            symbole,
            Annee) %>%
+  # La classe est retenue sur une sélection de codes paramètres
+  filter(code_indice %in% c('5856', '5910', '7036', '1000', '2527', '6951','2928','7316'))%>%
   summarise(classe = as.integer(max(code.x)), 
             resultat_indice = mean(resultat_indice),
             resultat_qualification = as.integer(max(code_qualification)))
@@ -505,12 +511,15 @@ table_indices_classes_annee
 
 ## Classe de qualité biologique globale 
 
-Calcul d'une classe de *qualité biologique globale* (maximum des classes des indices annuels)
+Calcul d'une classe de *qualité biologique globale* (Classe maximale annuelle - paramètre le plus déclassant parmi les indices 5856, 5910, 7036, 1000, 2527, 6951)
++ 2928 + 7316
 
 ```{r}
 table_indices_classe_globale_annee <- table_indices_classes_annee %>%
-  group_by(code_station_hydrobio, longitude_wgs84, latitude_wgs84, Annee)%>%
-  summarise(Resultat = max(classe))%>%
+  group_by(code_station_hydrobio, longitude_wgs84, latitude_wgs84, Annee) %>%
+  # La classe est retenue sur une sélection de codes paramètres
+  filter(code_indice %in% c('5856', '5910', '7036', '1000', '2527', '6951','2928','7316')) %>%
+  summarise(Resultat = max(classe)) %>%
   mutate(Serie = 'Classe - Qualité biologique Globale', 
          libelle_support = 'Qualité biologique Globale',
          symbole = 'X')
@@ -664,6 +673,8 @@ insert_oeb_eau_qualite_biologique_ce
 dbExecute(con_eau_tbi, "TRUNCATE TABLE oeb_eau_qualite_biologique_ce")
 
 dbAppendTable(conn = con_eau_tbi, name = "oeb_eau_qualite_biologique_ce", value = insert_oeb_eau_qualite_biologique_ce, fileEncoding="latin1")
+
+# 18 5713 lignes insérées le 22/02/2022
 ```
 
 ## Exports CSV pour la publication du jeu de données sur les portails opendata
