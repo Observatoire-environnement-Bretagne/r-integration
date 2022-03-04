@@ -235,7 +235,6 @@ series_toxines <- data_toxines %>%
          remarque_code = case_when(parametre_code == '486' ~ '4', # Présence ou absence 
                                    resultat == '<100' ~ '9', # Denombrement < Valeur
                                    is.na(resultat) ~ '0', # Analyse non faite
-                                   
                                    resultat == 'N.D.' ~ '2', # < seuil de détection
                                    startsWith(resultat,'<') ~ '10', # < seuil de quantification
                                    TRUE ~ '1' # Domaine de validité
@@ -244,8 +243,8 @@ series_toxines <- data_toxines %>%
                                       resultat == '<0,3' ~ 0.3,
                                       resultat == '<100' ~ 100,
                                       resultat == '<1' ~ 1),
-         # Récupération du résultat numérique. Resultat = limite de quantification si < seuil
-         resultat = case_when(startsWith(resultat, '<') ~ limite_quantification,
+         # Récupération du résultat numérique. resultat = 0 si < seuil
+         resultat = case_when(remarque_code %in% c('9','2','10') ~ 0,
                                       resultat == TRUE ~ 1,
                                       resultat == FALSE ~ 0,
                                       TRUE ~ as.numeric(resultat)),
@@ -277,7 +276,8 @@ data_toxines %>%
 # Format de la table eau_structure.cyano_analyse
 
 cyano_analyse <- series_toxines %>%
-  filter(!is.na(resultat) & ! is.na(serie_code))%>%
+  filter(#!is.na(resultat) &  
+           !is.na(serie_code))%>%
   left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="serie")),serie_id,unite_id,code), by=c("serie_code" = "code"), copy=TRUE)%>%
   left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="parametre")),parametre_id,code), by=c("parametre_code" = "code"), copy=TRUE)%>%
   left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="site")),site_id,code), by=c("site_code" = "code"), copy=TRUE) %>%
@@ -289,7 +289,7 @@ cyano_analyse <- series_toxines %>%
   left_join(select(tbl(con_postgresql_dev, Id(schema="eau_structure", table="date")),date_id,date_du_jour), by=c("prelevement_date" = "date_du_jour"), copy=TRUE)%>%
   select(rdd_id, site_id, date_id, prelevement_code, milieu_id, support_id, fraction_id, serie_id, parametre_id, resultat, unite_id, remarque_id, limite_quantification, source, maj)
 
-cyano_analyse %>% filter(remarque_id == 10)
+cyano_analyse
 ```
 ## Ecriture dans la base structure
 
@@ -411,7 +411,7 @@ dbAppendTable(con_postgresql_dev, Id(schema="eau_structure", table="cyano_interd
 
 ## Insertions
 
-```{r insertion}
+```{r insertion, eval=FALSE, include=FALSE}
 
 # Ecriture en base, en fonction du contexte developpement/production
 
@@ -452,19 +452,7 @@ if(params$contexte == "production") {
   }
 
 ```
-# Verification
 
-## SQL
-
-```{sql connection=con_mysql_oeb}
-
-SELECT 'Fermetures', count(*), max(DatePrel), count(distinct CdPrel) FROM oeb_ars_cyano.ars_fermeture
-UNION
-SELECT 'Toxines', count(*), max(DatePrel), count(distinct CdPrel) FROM oeb_ars_cyano.ars_toxines
-UNION
-SELECT 'Denombrements', count(*), max(DatePrel), count(distinct CdPrel) FROM oeb_ars_cyano.ars_denombrement ;
-
-```
 
 
 
