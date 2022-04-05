@@ -3,10 +3,12 @@ title: "Integration des données piezometriques"
 output: html_notebook
 params:
   reseau_piezo: '0400000020'
-  date_debut: 2021-11-01
-  date_fin: 2021-12-01
+  date_debut: 2021-12-01
+  date_fin: 2022-02-28
   pagination: 5000
   path_dataviz: 'O:/04.DATAVISUALISATION/PIEZO_NIVEAU_NAPPES/BULLETIN PIEZO_SOURCE'
+  path_source: 'O:\01.BD_EAU\BRGM\BULLETIN PIEZO'
+  fichier_mensuel: 'Points_reseauPz_fev22.xlsx'
   
 ---
 
@@ -175,7 +177,7 @@ query_chroniques = list(
                  format = 'json',
                  size = params$pagination,
                  date_debut_mesure = params$date_debut,
-                 date_fin_mesure = as.Date(params$date_fin)-1)
+                 date_fin_mesure = as.Date(params$date_fin))
 
 # Requête des chroniques
 hubeau_chroniques <- get_hubeau(path = "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques?", query=query_chroniques)
@@ -245,6 +247,7 @@ db.insertion(con = con_mysql_oeb, table = "oeb_tbi_variationnappe_tmp", data = o
 # 2021-10-04 : 1487 lignes insérées pour septembre 2021
 # 2021-12-10 : 1532 lignes insérées pour octobre 2021
 # 2021-12-10 : 1493 lignes insérées pour novembre 2021
+# 2022-03-07 : 4521 lignes insérées pour février 2022
 ```
 # Import des fichiers d'expertise du BRGM
 
@@ -255,26 +258,28 @@ db.insertion(con = con_mysql_oeb, table = "oeb_tbi_variationnappe_tmp", data = o
 ```{r import_Point_Reseau_Evolution}
 
 fichier <- "OEB_Point_Reseau_Evolution.xlsx"
-sheets <- excel_sheets(path=paste0(params$path_dataviz,'/',fichier[1]))
+sheets <- excel_sheets(path=paste0(params$path_source,'/',fichier[1]))
 
-import_reseau_evolution <- read_xlsx(paste0(params$path_dataviz,'/',fichier), 
+import_reseau_evolution <- read_xlsx(paste0(params$path_source,'/',fichier), 
           sheet=sheets[1])
+
+import_reseau_evolution
 ```
 
-```{r write_table_fact_resultat_site, eval=FALSE, include=FALSE}
+```{r write_table_nappe_etat_mensuel, eval=FALSE, include=FALSE}
 
 # Migration de la table d'expertise du BRGM à partir du fichier excel
 
 # Lecture des tables de dimensions
 
-calendrier <- tbl(con_postgresql_dev, dbplyr::in_schema("referentiel","dim_date")) # Lecture du calendrier dans le référentiel
+calendrier <- tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","date")) # Lecture du calendrier dans le référentiel
 
-series <- tbl(con_postgresql_dev, dbplyr::in_schema("referentiel","dim_serie")) # Lecture des noms de séries de données
+series <- tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","serie")) # Lecture des noms de séries de données
 
-sites <- tbl(con_postgresql_dev, dbplyr::in_schema("referentiel","dim_site"))%>% filter(site_type_code == 4) %>% mutate(site_code = substr(site_code, 1,10))
+sites <- tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","site"))%>% filter(typesite_id == 4) %>% mutate(code = substr(code, 1,10))
 
 # Formatage des données pour la table des résultats par site
-fact_resultat_site <- import_reseau_evolution %>%
+import_nappe_etat_mensuel <- import_reseau_evolution %>%
   left_join(select(calendrier,date_du_jour,mm_yyyy,dernier_jour_du_mois), by=c('periode'='date_du_jour'), copy = TRUE) %>%
   select(site_code = Num_BSS, 
          periode = mm_yyyy,
@@ -282,18 +287,20 @@ fact_resultat_site <- import_reseau_evolution %>%
          Niveau,
          Evolution)%>%
   pivot_longer(cols=c("Niveau","Evolution"), names_to = 'Serie', values_to='Resultat') %>%
-  mutate(Serie=case_when(Serie == "Niveau" ~ "nappe_niveau_mensuel_expertise",
+  mutate(Serie_code=case_when(Serie == "Niveau" ~ "nappe_niveau_mensuel_expertise",
                          Serie == "Evolution" ~ "nappe_variation_mensuelle_expertise"),
-         date_dim_id=format.Date(as.Date(dernier_jour_du_mois),"%Y%m%d"))%>%
-  left_join(select(series,serie_id,serie_code), by=c("Serie" = "serie_code"), copy = TRUE)%>%
-  left_join(select(sites,site_id,site_code), by="site_code", copy = TRUE)%>%
-  select(site_id,periode,date_dim_id,serie_id,resultat = Resultat)
-
-fact_resultat_site
+         date_id=format.Date(as.Date(dernier_jour_du_mois),"%Y%m%d"),
+         source = 'BRGM',
+         maj = Sys.Date())%>%
+  left_join(select(series,serie_id,code), by=c("Serie_code" = "code"), copy = TRUE)%>%
+  left_join(select(sites,site_id,code), by=c("site_code" = "code"), copy = TRUE)%>%
+  select(site_id,periode,date_id,serie_id,resultat = Resultat,source,maj)
 
 # Ecriture en base
-  #dbWriteTable(con_postgresql_dev, SQL("data_aggregees.fact_resultat_site"), fact_resultat_site, overwrite=TRUE, append=FALSE, fileEncoding="latin1")
+  #dbWriteTable(con_postgresql_dev, SQL("eau_structure.nappe_etat_mensuel"), import_nappe_etat_mensuel, overwrite=FALSE, append=TRUE, fileEncoding="latin1")
 
+
+import_nappe_etat_mensuel
 ```
 
 # Import du fichier d'expertise mensuelle sur le niveau des nappes
@@ -314,10 +321,10 @@ sites <- tbl(con_postgresql_dev, dbplyr::in_schema("eau_structure","site"))%>% f
 # abbreviation du mois utilisée pour le nom de fichier
 mois_ab <- c("janv", "fev", "mars", "avril", "mai", "juin", "juill", "aout", "sep", "oct", "nov", "dec")
 
-fichier <- paste0("Points_reseauPz_",mois_ab[as.integer(format.Date(params$date_debut,"%m"))],format.Date(params$date_debut,"%y"),".xlsx")
-sheets <- excel_sheets(path=paste0(params$path_dataviz,'/',fichier[1]))
+fichier <- paste0("Points_reseauPz_",mois_ab[as.integer(format.Date(params$date_fin,"%m"))],format.Date(params$date_fin,"%y"),".xlsx")
+sheets <- excel_sheets(path=paste0(params$path_source,'/',fichier[1]))
 
-import_bulletin_piezo <- read_xlsx(paste0(params$path_dataviz,'/',fichier), 
+import_bulletin_piezo <- read_xlsx(paste0(params$path_source,'/',fichier), 
           sheet=sheets[1])%>%
   mutate(site_code = str_remove_all(Num_BSS, "-"),
          date_du_jour = as.Date(params$date_debut)) %>%
@@ -331,15 +338,21 @@ import_bulletin_piezo <- read_xlsx(paste0(params$path_dataviz,'/',fichier),
   # Jointure des id de date
   left_join(select(calendrier,date_du_jour,mm_yyyy,dernier_jour_du_mois), by='date_du_jour', copy = TRUE)%>%
   # id de date à partir du dernier jour du mois
-  mutate(date_id=format.Date(as.Date(dernier_jour_du_mois),"%Y%m%d"))%>%
+  mutate(date_id=format.Date(as.Date(dernier_jour_du_mois),"%Y%m%d"),
+                             source = 'BRGM',
+                             maj = Sys.Date())%>%
   # Sélection des champs du schema
-  select(site_id,periode=mm_yyyy,date_id,serie_id,resultat = Resultat)
+  select(site_id,periode=mm_yyyy,date_id,serie_id,resultat = Resultat, source, maj)
 
 import_bulletin_piezo
 
-# Ecriture en base
-  #dbWriteTable(con_postgresql_dev, SQL("eau_structure.nappe_etat_mensuel"), import_bulletin_piezo, overwrite=FALSE, append=TRUE, fileEncoding="latin1")
-
 ```
+
+```{r ecriture_bulletin_mensuel, eval=FALSE, include=FALSE}
+# Ecriture en base
+
+dbWriteTable(con_postgresql_dev, SQL("eau_structure.nappe_etat_mensuel"), import_bulletin_piezo, overwrite=FALSE, append=TRUE, fileEncoding="latin1")
+```
+
 
 
